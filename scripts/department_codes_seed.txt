@@ -1,0 +1,147 @@
+01	Church Office
+011	Church Financial Offices
+012	Church Service Handouts
+013	Church Paperwork/forms
+02	Academy Office
+021	Academy Advertising
+022	Academy Financial Offices
+023	Academy Fundraising
+024	Academy Graduation
+025	Academy Registration
+026	Academy Teachers
+027	Academy Textbook/Materials
+03	LSBC Office
+031	LSBC Activities
+032	LSBC Advertising/Tour
+033	LSBC College Days
+034	LSBC Financial Offices
+035	LSBC Fundraising
+036	LSBC Graduation
+037	LSBC International
+038	LSBC Kitchen
+039	LSBC Registration
+0310	LSBC Syllabus
+0311	LSBC Textbook/Materials
+04	Administrative Assistants
+041	AA Church
+042	AA Academy
+043	AA LSBC
+05	Acts of Caring Ministry
+06	Advertising (CHURCH)
+07	America for Christ
+08	Baptist Scout Rangers
+09	Bible Blazers
+10	SWLC
+11	Bookstore
+12	Building Programs & Maintenance
+13	Bus Office
+131	Bus Bible Clubs, Dr. Dale III
+132	Bus Fliers
+1320	A1, Josh Wells
+1321	A2, Juan Salazar
+1322	A3, Tino Diaz
+1323	A4, Felipe Vega
+1324	A5, Will Reeves
+1325	B1, Nosa Edokpayi
+1326	B2, Dale Cavanaugh Jr.
+1327	B3, Penny Baldiviez
+1328	B4
+1329	B5
+14	CALM Ministry
+15	Children's Dept.
+16	Couples Retreat
+17	Deaf Ministry
+18	Discipleship Program
+19	FAR
+20	Funerals
+21	Guest Services
+22	Heritage Cafe
+23	Homeless Ministry
+24	Homeschool
+241	Homeschool Activities
+242	Homeschool Graduation
+25	IBWM
+26	IWWE
+27	Janitorial
+28	Kitchen (church)
+29	Ladies Conference
+30	Ladies Ministries
+301	Ladies Banquet
+302	Ladies Christmas Fellowship
+303	Ladies Bridal/Baby Showers
+304	Ladies Meetings
+31	Lawn Crew
+32	Media Dept.
+33	Missions
+331	Missions Financial Offices
+332	Missions Correspondence
+333	Missions Office
+34	Missions Conference
+35	Music
+351	Music: Choir
+352	Music: Christmas Musical
+353	Music: Orchestra
+36	Nursery
+37	Nursing Home Ministry
+38	Parkside Publications
+39	Patch/Peewee Club
+40	Personal
+41	PHOSTER club
+42	Programs (Fall/Spring)
+43	Public School Bible Clubs
+44	Reception
+45	Rescue Mission Ministry
+46	Security/Medical Team
+47	Soul Winning
+48	Spanish BLC
+49	Spanish Dept.
+491	Spanish Sunday School Teachers
+492	Spanish Service Handouts
+493	Spanish Soul Winning
+494	Spanish Music
+495	Spanish Activities
+50	Spanish Family Conference
+51	Special Events
+511	Labor Day Picnic
+512	The Hunt
+513	Veteran's Day
+52	Special Sundays
+520	Vision Night
+521	Anniversary/Appreciation Sundays
+522	Easter Sunday
+523	Mother's Day
+524	Father's Day
+525	Memorial Sunday
+526	God & Country Sunday
+527	Back to School Sunday
+528	Grandparent's Day
+529	Round Up Sunday
+5210	Christmas Sunday
+53	Sports League
+54	Sunday School Dept.
+541	Sunday School Lessons/Handouts
+542	SS Teacher Handouts
+5420	Sr. Saints
+5421	Sweetheart Couples
+5422	Committed Couples
+5423	Growing Together
+5424	Overcomers
+5425	Joyful Ladies
+5426	Young Professionals
+5427	Crossroads
+5428	Gems & Jewels
+5429	Old Paths
+55	Ushers
+56	VBS
+57	Weddings
+58	Victory Baptist Church Plant
+59	Youth Camp
+60	Youth Conf.
+61	Youth Dept.
+611	Youth Sunday School
+612	Youth Young Fundamentalist
+613	Youth Handouts
+614	Youth Activities
+615	Youth Fundraising
+62	USB Scans
+63	Singles Dept.

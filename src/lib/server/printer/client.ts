@@ -14,6 +14,17 @@
 // PrinterClient rather than talking to the printer directly, so if a
 // better integration (Sharp OSA, if ever pursued) becomes available
 // later, only this file needs to change.
+//
+// IMPORTANT: redirects are followed manually (see requestFollowingRedirects
+// below), not via fetch's built-in `redirect: 'follow'`. Confirmed by
+// direct testing: this printer rotates its session cookie mid-redirect-
+// chain (sometimes more than once per request), and fetch's automatic
+// redirect following only exposes the *final* hop's Set-Cookie header on
+// the returned Response -- any cookie set on an intermediate redirect is
+// silently lost. That was causing every login attempt from the deployed
+// app to silently fail (the printer just re-served the login page) while
+// manual curl testing -- where curl's cookie jar correctly captures every
+// hop -- always looked fine, which is why this went unnoticed until now.
 
 import { env } from '$env/dynamic/private';
 
@@ -44,33 +55,54 @@ export class PrinterClient {
 		}
 	}
 
-	private async request(
+	/**
+	 * Sends one request, following any redirects itself (rather than via
+	 * fetch's `redirect: 'follow'`) so Set-Cookie headers on every hop --
+	 * not just the last one -- get captured. See the file-level comment
+	 * for why this matters for this specific printer.
+	 */
+	private async requestFollowingRedirects(
 		path: string,
 		init: RequestInit = {}
 	): Promise<{ res: Response; text: string }> {
-		const res = await fetch(`${BASE_URL}${path}`, {
-			...init,
-			redirect: 'follow',
-			headers: {
-				...(init.headers ?? {}),
-				...(this.cookie ? { cookie: this.cookie } : {})
+		let currentPath = path;
+		let currentInit = init;
+		for (let hop = 0; hop < 10; hop++) {
+			const res = await fetch(`${BASE_URL}${currentPath}`, {
+				...currentInit,
+				redirect: 'manual',
+				headers: {
+					...(currentInit.headers ?? {}),
+					...(this.cookie ? { cookie: this.cookie } : {})
+				}
+			});
+			this.captureCookies(res);
+
+			if (res.status >= 300 && res.status < 400) {
+				const location = res.headers.get('location');
+				if (!location)
+					throw new Error(`Printer sent a ${res.status} redirect with no Location header`);
+				currentPath = location;
+				currentInit = {}; // every hop after the first is a plain GET
+				continue;
 			}
-		});
-		this.captureCookies(res);
-		const text = await res.text();
-		return { res, text };
+
+			const text = await res.text();
+			return { res, text };
+		}
+		throw new Error(`Too many redirects while requesting ${path}`);
 	}
 
 	private async post(path: string, form: Record<string, string>): Promise<string> {
 		const body = new URLSearchParams(form);
-		const { text } = await this.request(path, { method: 'POST', body });
+		const { text } = await this.requestFollowingRedirects(path, { method: 'POST', body });
 		return text;
 	}
 
 	/** Logs in as admin. Throws on failure. Safe to call again to refresh the session. */
 	async login(): Promise<void> {
 		this.cookie = '';
-		const { text: loginPage } = await this.request('/');
+		const { text: loginPage } = await this.requestFollowingRedirects('/');
 		let token2 = extractToken2(loginPage);
 
 		const adminPage = await this.post('/login.html', {
@@ -92,17 +124,17 @@ export class PrinterClient {
 			'ggt_hidden(10008)': '3'
 		});
 
-		if (!result.includes('Machine Identification') && !/<title>[^<]*<\/title>/.test(result)) {
+		if (!result.includes('Machine Identification')) {
 			throw new Error('Printer admin login failed -- check PRINTER_ADMIN_PASSWORD');
 		}
 	}
 
 	/** GET a page, re-logging in once if the session has expired. */
 	async get(path: string): Promise<string> {
-		let { text } = await this.request(path);
+		let { text } = await this.requestFollowingRedirects(path);
 		if (text.includes('Login - BP-71C65') || text.includes('id="loginForm"')) {
 			await this.login();
-			({ text } = await this.request(path));
+			({ text } = await this.requestFollowingRedirects(path));
 		}
 		return text;
 	}

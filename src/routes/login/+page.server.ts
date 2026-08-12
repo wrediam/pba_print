@@ -25,6 +25,7 @@ export const actions: Actions = {
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',
 			httpOnly: true,
+			secure: false,
 			sameSite: 'lax',
 			expires: expiresAt
 		});

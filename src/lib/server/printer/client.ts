@@ -93,7 +93,13 @@ export class PrinterClient {
 		throw new Error(`Too many redirects while requesting ${path}`);
 	}
 
-	private async post(path: string, form: Record<string, string>): Promise<string> {
+	/**
+	 * Raw form POST using the current session, no token extraction. Public
+	 * for pages like the Job Log view whose pagination requires echoing
+	 * back the full existing hidden-field state (not just token1/token2)
+	 * -- see fetchJobLog in jobLog.ts.
+	 */
+	async post(path: string, form: Record<string, string>): Promise<string> {
 		const body = new URLSearchParams(form);
 		const { text } = await this.requestFollowingRedirects(path, { method: 'POST', body });
 		return text;

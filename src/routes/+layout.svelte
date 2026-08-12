@@ -8,6 +8,7 @@
 
 	const navLinks = [
 		{ href: '/', label: 'Dashboard' },
+		{ href: '/jobs', label: 'Print Jobs' },
 		{ href: '/reports', label: 'Billing Report' },
 		{ href: '/departments', label: 'Departments' },
 		{ href: '/people', label: 'People' },

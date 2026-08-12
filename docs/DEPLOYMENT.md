@@ -27,7 +27,7 @@ required one (marked below) is missing.
 | `PRINTER_HOST`                                        | no (default `192.168.1.222`) | The copier's LAN IP.                                                                                                                                                                 |
 | `PRINTER_ADMIN_PASSWORD`                              | **yes**                      | The copier's admin panel password.                                                                                                                                                   |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD`                   | **yes**                      | The one dashboard login, created once on first boot. Changing these later does **not** reset an existing account -- see `docs/ARCHITECTURE.md`.                                      |
-| `SYNC_INTERVAL_MINUTES`                               | no (default `15`)            | How often the background sync pulls new usage from the printer.                                                                                                                      |
+| `SYNC_INTERVAL_SECONDS`                               | no (default `30`)            | How often the background sync pulls new usage from the printer. Incremental syncs are fast (stop as soon as they hit already-imported jobs), so a short interval is fine.            |
 
 ## Option A: Coolify
 

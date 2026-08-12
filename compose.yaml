@@ -12,7 +12,7 @@ services:
       PRINTER_ADMIN_PASSWORD: admin
       ADMIN_USERNAME: parkside
       ADMIN_PASSWORD: adobe
-      SYNC_INTERVAL_MINUTES: 15
+      SYNC_INTERVAL_SECONDS: 30
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/ || exit 1']
       interval: 10s

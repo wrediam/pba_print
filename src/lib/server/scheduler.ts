@@ -1,9 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { syncPrinterUsage } from '$lib/server/printer/sync';
 
-const INTERVAL_MINUTES = Number(env.SYNC_INTERVAL_MINUTES ?? '15');
+const INTERVAL_SECONDS = Number(env.SYNC_INTERVAL_SECONDS ?? '30');
 
 let started = false;
+let running = false;
 
 /** Starts the periodic printer sync. Safe to call more than once -- only the first call does anything. */
 export function startScheduler() {
@@ -11,20 +12,31 @@ export function startScheduler() {
 	started = true;
 
 	const run = async () => {
+		// Guard against overlap: incremental syncs are normally fast, but
+		// the very first sync against an empty database walks the entire
+		// job log and can take a few seconds -- don't let a 30s timer
+		// start a second run on top of one still in flight.
+		if (running) return;
+		running = true;
 		try {
 			const result = await syncPrinterUsage();
 			console.log(
 				`[scheduler] sync ok: ${result.jobsNew} new job(s) of ${result.jobsFound} found` +
+					(result.jobsReconciled
+						? `, ${result.jobsReconciled} previously-unmatched job(s) reconciled`
+						: '') +
 					(result.unmatchedCodes.length
 						? `, unmatched codes: ${result.unmatchedCodes.join(', ')}`
 						: '')
 			);
 		} catch (err) {
 			console.error('[scheduler] sync failed:', err);
+		} finally {
+			running = false;
 		}
 	};
 
 	// Run once shortly after startup, then on the configured interval.
-	setTimeout(run, 10_000);
-	setInterval(run, INTERVAL_MINUTES * 60_000);
+	setTimeout(run, 5_000);
+	setInterval(run, INTERVAL_SECONDS * 1_000);
 }

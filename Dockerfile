@@ -7,7 +7,10 @@ RUN npm ci
 
 FROM deps AS build
 COPY . .
-RUN npm run build
+# SvelteKit's post-build analyse step imports server modules (including db/index.ts),
+# which throws if DATABASE_URL is missing. Provide a placeholder so the build passes;
+# the real value is injected at runtime via compose.yaml.
+RUN DATABASE_URL=postgres://build:build@localhost:5432/build npm run build
 
 # Kept as one image (not pruned to production-only deps) on purpose:
 # migrations/seeding run via drizzle-kit and plain `node --experimental-

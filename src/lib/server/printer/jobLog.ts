@@ -14,16 +14,16 @@
 // only a group heading over the 4 count columns -- there's no separate
 // overall total cell, so callers sum whichever of the 4 apply.
 
-import { env } from '$env/dynamic/private';
+import { APP_TIMEZONE, zonedWallTimeToUtc } from '$lib/server/tz';
 import type { PrinterClient } from './client';
 
 // The printer's Job Log timestamps have no timezone info (e.g.
 // "2026-08-13T10:00:22" is its own local wall-clock reading, not UTC),
 // but this app typically runs on a server set to UTC -- naively parsing
 // with `new Date(s)` would silently interpret that wall-clock time as
-// UTC and shift every job by the church's UTC offset. PRINTER_TIMEZONE
-// tells parseDate what IANA zone those strings are actually in.
-const PRINTER_TIMEZONE = env.PRINTER_TIMEZONE ?? 'America/Chicago';
+// UTC and shift every job by the church's UTC offset. APP_TIMEZONE
+// (env: PRINTER_TIMEZONE) tells parseDate what IANA zone those strings
+// are actually in.
 
 export interface PrinterJobLogRow {
 	printerJobId: number;
@@ -112,48 +112,12 @@ function parseCount(s: string): number | null {
 
 const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
 
-/**
- * How far a wall-clock reading in `timeZone` is from UTC at the given
- * instant, in ms (e.g. -5h for America/Chicago during CDT). Standard
- * "format the instant in the target zone, diff against the instant
- * itself" trick -- avoids pulling in a timezone library for one lookup.
- */
-function tzOffsetMs(timeZone: string, instant: Date): number {
-	const parts: Record<string, string> = {};
-	for (const p of new Intl.DateTimeFormat('en-US', {
-		timeZone,
-		hourCycle: 'h23',
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-		hour: '2-digit',
-		minute: '2-digit',
-		second: '2-digit'
-	}).formatToParts(instant)) {
-		if (p.type !== 'literal') parts[p.type] = p.value;
-	}
-	const asUtc = Date.UTC(
-		Number(parts.year),
-		Number(parts.month) - 1,
-		Number(parts.day),
-		Number(parts.hour),
-		Number(parts.minute),
-		Number(parts.second)
-	);
-	return asUtc - instant.getTime();
-}
-
-/** Parses one of the printer's naive local timestamps as PRINTER_TIMEZONE wall-clock time. */
+/** Parses one of the printer's naive local timestamps as APP_TIMEZONE wall-clock time. */
 function parseDate(s: string): Date | null {
 	const m = s.trim().match(NAIVE_DATETIME_RE);
 	if (!m) return null;
 	const [, y, mo, d, h, mi, se] = m.map(Number);
-	// Treat the wall-clock reading as if it were UTC, then correct by
-	// that same instant's actual offset from PRINTER_TIMEZONE. Using the
-	// guess itself (rather than "now") to look up the offset keeps this
-	// correct across DST transitions for historical jobs too.
-	const guess = Date.UTC(y, mo - 1, d, h, mi, se);
-	return new Date(guess - tzOffsetMs(PRINTER_TIMEZONE, new Date(guess)));
+	return zonedWallTimeToUtc(y, mo, d, h, mi, se, APP_TIMEZONE);
 }
 
 function parseRows(html: string): PrinterJobLogRow[] {

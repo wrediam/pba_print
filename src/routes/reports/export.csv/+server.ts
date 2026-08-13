@@ -1,5 +1,6 @@
 import type { RequestHandler } from './$types';
 import { buildUsageReport } from '$lib/server/reporting';
+import { resolveDateRange, toDateInput } from '$lib/server/tz';
 
 function csvEscape(v: string | number): string {
 	const s = String(v);
@@ -7,12 +8,8 @@ function csvEscape(v: string | number): string {
 }
 
 export const GET: RequestHandler = async ({ url }) => {
-	const now = new Date();
-	const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-	const fromParam = url.searchParams.get('from');
-	const toParam = url.searchParams.get('to');
-	const from = fromParam ? new Date(fromParam) : defaultFrom;
-	const to = toParam ? new Date(`${toParam}T23:59:59.999`) : now;
+	// Same timezone handling and defaulting as /reports -- see resolveDateRange.
+	const { from, to } = resolveDateRange(url);
 
 	const report = await buildUsageReport(from, to);
 
@@ -44,7 +41,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		].join(',')
 	);
 
-	const rangeLabel = `${from.toISOString().slice(0, 10)}_to_${to.toISOString().slice(0, 10)}`;
+	const rangeLabel = `${toDateInput(from)}_to_${toDateInput(to)}`;
 	return new Response(lines.join('\n') + '\n', {
 		headers: {
 			'Content-Type': 'text/csv',

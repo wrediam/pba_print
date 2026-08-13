@@ -2,6 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
 	import { formatCents } from '$lib/utils';
@@ -12,26 +14,42 @@
 </script>
 
 <div class="space-y-6">
-	<div class="flex items-center justify-between">
+	<div class="flex items-end justify-between">
 		<div>
 			<h1 class="text-2xl font-semibold">Dashboard</h1>
 			<p class="text-muted-foreground">
-				Usage for {data.report.from.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+				Usage for {data.report.from.toLocaleDateString()} – {data.report.to.toLocaleDateString()}
 			</p>
 		</div>
-		<form
-			method="POST"
-			action="?/sync"
-			use:enhance={() => {
-				syncing = true;
-				return async ({ update }) => {
-					await update();
-					syncing = false;
-				};
-			}}
-		>
-			<Button type="submit" disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</Button>
-		</form>
+		<div class="flex items-end gap-3">
+			<form method="GET" class="flex items-end gap-3">
+				<div class="space-y-2">
+					<Label for="from">From</Label>
+					<Input id="from" name="from" type="date" value={data.fromInput} />
+				</div>
+				<div class="space-y-2">
+					<Label for="to">To</Label>
+					<Input id="to" name="to" type="date" value={data.toInput} />
+				</div>
+				<Button type="submit" variant="outline">Update</Button>
+			</form>
+			{#if data.fromInput !== data.thisMonthInput}
+				<Button variant="outline" href="/">This Month</Button>
+			{/if}
+			<form
+				method="POST"
+				action="?/sync"
+				use:enhance={() => {
+					syncing = true;
+					return async ({ update }) => {
+						await update();
+						syncing = false;
+					};
+				}}
+			>
+				<Button type="submit" disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</Button>
+			</form>
+		</div>
 	</div>
 
 	{#if data.lastSync}
@@ -110,7 +128,7 @@
 					{:else}
 						<Table.Row>
 							<Table.Cell colspan={4} class="text-center text-muted-foreground">
-								No usage recorded yet this month. Try "Sync Now" above.
+								No usage recorded in this range. Try "Sync Now" above.
 							</Table.Cell>
 						</Table.Row>
 					{/each}

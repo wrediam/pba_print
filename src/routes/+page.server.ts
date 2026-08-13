@@ -4,6 +4,7 @@ import { syncRun } from '$lib/server/db/schema';
 import { desc } from 'drizzle-orm';
 import { buildUsageReport } from '$lib/server/reporting';
 import { syncPrinterUsage } from '$lib/server/printer/sync';
+import { resolveDateRange, startOfMonthInZone, toDateInput } from '$lib/server/tz';
 
 export const actions: Actions = {
 	sync: async () => {
@@ -16,17 +17,24 @@ export const actions: Actions = {
 	}
 };
 
-export const load: PageServerLoad = async () => {
-	const now = new Date();
-	const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+// Defaults to the current calendar month (in the church's own timezone,
+// not necessarily the server's) if no from/to params are given, same as
+// Reports -- see resolveDateRange. That's what makes the Dashboard
+// "always start on this month" while still letting you look back at a
+// previous month or range via the same date pickers.
+export const load: PageServerLoad = async ({ url }) => {
+	const { from, to } = resolveDateRange(url);
 
 	const [report, lastSync] = await Promise.all([
-		buildUsageReport(startOfMonth, now),
+		buildUsageReport(from, to),
 		db.select().from(syncRun).orderBy(desc(syncRun.startedAt)).limit(1)
 	]);
 
 	return {
 		report,
-		lastSync: lastSync[0] ?? null
+		lastSync: lastSync[0] ?? null,
+		fromInput: toDateInput(from),
+		toInput: toDateInput(to),
+		thisMonthInput: toDateInput(startOfMonthInZone(new Date()))
 	};
 };

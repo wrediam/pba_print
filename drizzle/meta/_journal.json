@@ -22,6 +22,13 @@
       "when": 1786655714913,
       "tag": "0002_add_paper_cost_to_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786656581617,
+      "tag": "0003_add_dept_billable",
+      "breakpoints": true
     }
   ]
 }

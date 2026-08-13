@@ -17,18 +17,22 @@ export const actions: Actions = {
 		const data = await request.formData();
 		const bwDollars = Number(data.get('bwCost'));
 		const colorDollars = Number(data.get('colorCost'));
+		const paperDollars = Number(data.get('paperCost'));
 		if (
 			!Number.isFinite(bwDollars) ||
 			!Number.isFinite(colorDollars) ||
+			!Number.isFinite(paperDollars) ||
 			bwDollars < 0 ||
-			colorDollars < 0
+			colorDollars < 0 ||
+			paperDollars < 0
 		) {
 			return fail(400, { error: 'Enter valid, non-negative costs per copy.' });
 		}
 
 		await db.insert(rate).values({
 			bwCostCents: Math.round(bwDollars * 100),
-			colorCostCents: Math.round(colorDollars * 100)
+			colorCostCents: Math.round(colorDollars * 100),
+			paperCostCents: Math.round(paperDollars * 100)
 		});
 	}
 };

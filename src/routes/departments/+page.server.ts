@@ -44,5 +44,15 @@ export const actions: Actions = {
 			.update(department)
 			.set({ active: !active, updatedAt: new Date() })
 			.where(eq(department.id, id));
+	},
+
+	toggleBillable: async ({ request }) => {
+		const data = await request.formData();
+		const id = Number(data.get('id'));
+		const billable = data.get('billable') === 'true';
+		await db
+			.update(department)
+			.set({ billable: !billable, updatedAt: new Date() })
+			.where(eq(department.id, id));
 	}
 };

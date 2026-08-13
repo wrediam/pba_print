@@ -208,7 +208,13 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 					)
 			: [];
 		const existingIds = new Set(existing.map((e) => e.printerJobId));
-		const newRows = rows.filter((r) => !existingIds.has(r.printerJobId));
+		// Skip jobs with no pages at all -- they're cancelled/error entries
+		// with nothing to bill and only clutter the job log.
+		const newRows = rows.filter(
+			(r) =>
+				!existingIds.has(r.printerJobId) &&
+				r.bwCount + r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0) > 0
+		);
 
 		const people = await db
 			.select({ id: person.id, personalCode: person.personalCode })

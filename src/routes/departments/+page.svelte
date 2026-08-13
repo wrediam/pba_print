@@ -16,7 +16,8 @@
 		<h1 class="text-2xl font-semibold">Departments</h1>
 		<p class="text-muted-foreground">
 			Department codes from the copier-codes sheet. The account number embedded on each print job is
-			a person's code plus a department code (e.g. 598 + 61 = 59861).
+			a person's code plus a department code (e.g. 598 + 61 = 59861). Non-billable departments
+			(e.g. USB Scans) are excluded from billing reports.
 		</p>
 	</div>
 
@@ -43,14 +44,16 @@
 	</Card.Root>
 
 	<Card.Root>
-		<Card.Content>
+		<Card.Content class="overflow-x-auto p-0">
+			<div class="px-6 pb-6 pt-6">
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
 						<Table.Head class="w-24">Code</Table.Head>
 						<Table.Head>Label</Table.Head>
 						<Table.Head class="w-24">Status</Table.Head>
-						<Table.Head class="w-32"></Table.Head>
+						<Table.Head class="w-24">Billing</Table.Head>
+						<Table.Head class="w-48"></Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -63,19 +66,34 @@
 									{dept.active ? 'Active' : 'Inactive'}
 								</Badge>
 							</Table.Cell>
+							<Table.Cell>
+								<Badge variant={dept.billable ? 'default' : 'outline'}>
+									{dept.billable ? 'Billable' : 'Not billed'}
+								</Badge>
+							</Table.Cell>
 							<Table.Cell class="text-right">
-								<form method="POST" action="?/toggleActive" use:enhance>
-									<input type="hidden" name="id" value={dept.id} />
-									<input type="hidden" name="active" value={dept.active} />
-									<Button variant="outline" size="sm" type="submit">
-										{dept.active ? 'Deactivate' : 'Reactivate'}
-									</Button>
-								</form>
+								<div class="flex justify-end gap-2">
+									<form method="POST" action="?/toggleBillable" use:enhance>
+										<input type="hidden" name="id" value={dept.id} />
+										<input type="hidden" name="billable" value={dept.billable} />
+										<Button variant="ghost" size="sm" type="submit">
+											{dept.billable ? 'Mark not billed' : 'Mark billable'}
+										</Button>
+									</form>
+									<form method="POST" action="?/toggleActive" use:enhance>
+										<input type="hidden" name="id" value={dept.id} />
+										<input type="hidden" name="active" value={dept.active} />
+										<Button variant="outline" size="sm" type="submit">
+											{dept.active ? 'Deactivate' : 'Reactivate'}
+										</Button>
+									</form>
+								</div>
 							</Table.Cell>
 						</Table.Row>
 					{/each}
 				</Table.Body>
 			</Table.Root>
+			</div>
 		</Card.Content>
 	</Card.Root>
 </div>

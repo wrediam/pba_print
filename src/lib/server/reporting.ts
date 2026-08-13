@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import { department, person, printJob, rate } from '$lib/server/db/schema';
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm';
 
 export interface DepartmentUsage {
 	departmentId: number | null;
@@ -72,7 +72,14 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 		.from(printJob)
 		.leftJoin(department, eq(printJob.departmentId, department.id))
 		.leftJoin(person, eq(printJob.personId, person.id))
-		.where(and(gte(printJob.startedAt, from), lte(printJob.startedAt, to)));
+		.where(
+			and(
+				gte(printJob.startedAt, from),
+				lte(printJob.startedAt, to),
+				gt(printJob.totalCount, 0),
+				or(isNull(department.billable), eq(department.billable, true))
+			)
+		);
 
 	const byDept = new Map<string, DepartmentUsage>();
 	let totalBwCount = 0;

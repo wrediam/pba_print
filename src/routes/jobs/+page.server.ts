@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { department, person, printJob } from '$lib/server/db/schema';
-import { desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
 
 const PAGE_SIZE = 100;
 
@@ -43,8 +43,8 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const rows = await (
 		unmatchedOnly
-			? baseQuery.where(or(isNull(printJob.personId), isNull(printJob.departmentId)))
-			: baseQuery
+			? baseQuery.where(and(gt(printJob.totalCount, 0), or(isNull(printJob.personId), isNull(printJob.departmentId))))
+			: baseQuery.where(gt(printJob.totalCount, 0))
 	)
 		.orderBy(desc(printJob.startedAt))
 		.limit(PAGE_SIZE)

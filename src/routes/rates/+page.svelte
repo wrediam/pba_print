@@ -35,7 +35,7 @@
 						type="number"
 						step="0.001"
 						min="0"
-						placeholder="0.010"
+						placeholder="0.030"
 						class="w-32"
 						required
 					/>
@@ -48,7 +48,20 @@
 						type="number"
 						step="0.001"
 						min="0"
-						placeholder="0.080"
+						placeholder="0.090"
+						class="w-32"
+						required
+					/>
+				</div>
+				<div class="space-y-2">
+					<Label for="paperCost">Paper / supplies ($/copy, all)</Label>
+					<Input
+						id="paperCost"
+						name="paperCost"
+						type="number"
+						step="0.001"
+						min="0"
+						placeholder="0.020"
 						class="w-32"
 						required
 					/>
@@ -72,6 +85,7 @@
 						<Table.Head>Effective From</Table.Head>
 						<Table.Head>B&amp;W / copy</Table.Head>
 						<Table.Head>Color / copy</Table.Head>
+						<Table.Head>Paper / copy</Table.Head>
 						<Table.Head class="w-24"></Table.Head>
 					</Table.Row>
 				</Table.Header>
@@ -81,6 +95,7 @@
 							<Table.Cell>{new Date(r.effectiveFrom).toLocaleString()}</Table.Cell>
 							<Table.Cell>{formatCents(r.bwCostCents)}</Table.Cell>
 							<Table.Cell>{formatCents(r.colorCostCents)}</Table.Cell>
+							<Table.Cell>{formatCents(r.paperCostCents)}</Table.Cell>
 							<Table.Cell>
 								{#if i === 0}
 									<Badge>Current</Badge>

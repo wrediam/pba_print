@@ -41,6 +41,7 @@ export const department = pgTable(
 		code: text('code').notNull(),
 		label: text('label').notNull(),
 		active: boolean('active').notNull().default(true),
+		billable: boolean('billable').notNull().default(true),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 	},

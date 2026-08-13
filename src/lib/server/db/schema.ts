@@ -77,22 +77,37 @@ export const rate = pgTable('rate', {
 // One row per job pulled from the printer's own Job Log (see
 // src/lib/server/printer/). printerJobId is the printer's own log
 // entry number -- used to detect and skip jobs already imported.
+//
+// Column mapping confirmed directly against the printer's own Job Log
+// table headers (see src/lib/server/printer/jobLog.ts) -- userName/
+// loginName are two distinct columns ("User Name" / "Login Name"), and
+// bwCount/fullColorCount/twoColorCount/singleColorCount are 4 separate
+// counters (there's no separate "total pages" cell on the printer's
+// page; totalCount here is just their sum for convenience).
 export const printJob = pgTable(
 	'print_job',
 	{
 		id: serial('id').primaryKey(),
 		printerJobId: integer('printer_job_id').notNull(),
-		jobMode: text('job_mode').notNull(), // "Print" | "Copy"
-		fullCode: text('full_code'), // the raw account number off the printer, or null if "N/A"
+		jobMode: text('job_mode').notNull(), // "Print" | "Copy" | "USB Memory Scan" | ...
+		loginName: text('login_name'), // the raw account/login code off the printer, or null if "N/A"
 		personId: integer('person_id').references(() => person.id),
 		departmentId: integer('department_id').references(() => department.id),
-		computerName: text('computer_name'), // printer's "Computer Name"/"User Name" field
+		userName: text('user_name'), // printer's "User Name" field -- friendly display name
 		startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
 		completedAt: timestamp('completed_at', { withTimezone: true }),
-		bwCount: integer('bw_count').notNull().default(0),
-		colorCount: integer('color_count').notNull().default(0),
-		totalCount: integer('total_count').notNull().default(0),
-		result: text('result'), // "OK" | "Stopped" | ...
+		bwCount: integer('bw_count').notNull().default(0), // Black & White Total Count
+		colorCount: integer('color_count').notNull().default(0), // fullColorCount + twoColorCount + singleColorCount
+		totalCount: integer('total_count').notNull().default(0), // bwCount + colorCount
+		fullColorCount: integer('full_color_count').notNull().default(0),
+		twoColorCount: integer('two_color_count'), // null if "N/A" (not applicable to this job's mode)
+		singleColorCount: integer('single_color_count'), // null if "N/A"
+		result: text('result'), // "OK" | "Stopped" | "Send OK" | "Send Error" | ...
+		errorCause: text('error_cause'), // null if "N/A"
+		directAddress: text('direct_address'), // "Image Send Related Item" -- null if "N/A"
+		colorSetting: text('color_setting'), // "Common Functionality" -- e.g. "Auto" | "B/W" | "Full Color"
+		paperSize: text('paper_size'), // "Paper Select" -- null if "N/A"
+		duplexSetup: text('duplex_setup'), // null if "N/A"
 		syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(t) => [uniqueIndex('print_job_printer_job_id_idx').on(t.printerJobId)]

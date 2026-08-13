@@ -2,41 +2,41 @@
 // Control > Job Log > View Job Log > "Quick Job Log View(G)" button),
 // paginating through as much history as needed.
 //
-// !! VERIFY BEFORE TRUSTING FOR REAL BILLING !!
-// The quick view returns a fixed set of columns without letting us pick
-// them explicitly. Based on jobs observed during development, the 4
-// numeric columns appear in this order:
-//   [[Total Count]], [[Black & White Total Count]], [[Full Color Total
-//   Count]], [[a 4th column, unconfirmed -- possibly a specific color
-//   mode subtotal]]
-// This was inferred from a handful of real jobs (a 4-page Copy job
-// showed "4" in the 2nd position; a 596-page admin Print job showed 596
-// in the 1st position with the rest 0) -- consistent with that ordering,
-// but NOT confirmed against a job of deliberately known B&W vs. color
-// content. Before trusting this for a real invoice, either (a) print a
-// deliberately-color test page and a deliberately-B&W one and confirm
-// which column moves, or (b) switch to the full "Select Item" column
-// picker on the View Job Log page and request Black & White Total Count
-// / Full Color Total Count by name instead of by position.
+// Column mapping confirmed directly against the printer's own table
+// headers (`<th>` cells on the Job Log page), not inferred from sample
+// data -- see the two-row header:
+//   Job ID | Job Mode | User Name | Login Name | Date [Start, Complete]
+//   | Total Count [Black & White, Full Color, 2 Color, Single Color]
+//   | Result | Error Cause | Image Send Related Item [Direct Address]
+//   | Common Functionality [Color Setting] | Paper Select [Size]
+//   | Duplex Setup
+// That's 16 <td> cells per row, in that exact order. "Total Count" is
+// only a group heading over the 4 count columns -- there's no separate
+// overall total cell, so callers sum whichever of the 4 apply.
 
 import type { PrinterClient } from './client';
 
 export interface PrinterJobLogRow {
 	printerJobId: number;
 	jobMode: string;
-	computerName: string;
-	accountCode: string | null; // null when the printer logged "N/A"
+	userName: string; // printer's "User Name" -- friendly display name
+	loginName: string | null; // printer's "Login Name" -- the code typed in, or null if "N/A"
 	startedAt: Date;
 	completedAt: Date | null;
-	totalCount: number;
-	bwCount: number;
-	colorCount: number;
-	unconfirmedFourthCount: number;
+	bwCount: number; // Black & White Total Count
+	fullColorCount: number; // Full Color Total Count
+	twoColorCount: number | null; // 2 Color Total Count, or null if "N/A" (not applicable to this job mode)
+	singleColorCount: number | null; // Single Color Total Count, or null if "N/A"
 	result: string;
+	errorCause: string | null; // null if "N/A"
+	directAddress: string | null; // "Image Send Related Item" -- null if "N/A"
+	colorSetting: string | null; // "Common Functionality" -- e.g. "Auto" | "B/W" | "Full Color"
+	paperSize: string | null; // "Paper Select" -- null if "N/A"
+	duplexSetup: string | null; // null if "N/A"
 }
 
 const ROW_RE =
-	/<tr>\s*<td>(\d+)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g;
+	/<tr>\s*<td>(\d+)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g;
 
 // Hidden inputs on this printer's pages appear in two different
 // attribute orders -- token1/token2/action/ordinate as
@@ -88,6 +88,19 @@ function decodeEntities(s: string): string {
 		.trim();
 }
 
+/** Decodes entities and normalizes the printer's "N/A" placeholder to null. */
+function decodeOrNull(s: string): string | null {
+	const decoded = decodeEntities(s);
+	return decoded === 'N/A' ? null : decoded;
+}
+
+/** Parses one of the 4 count columns: "N/A" means not applicable to this job's mode, not zero. */
+function parseCount(s: string): number | null {
+	const t = s.trim();
+	if (t === 'N/A') return null;
+	return Number(t) || 0;
+}
+
 function parseDate(s: string): Date | null {
 	const t = s.trim();
 	if (!t) return null;
@@ -99,21 +112,44 @@ function parseDate(s: string): Date | null {
 function parseRows(html: string): PrinterJobLogRow[] {
 	const rows: PrinterJobLogRow[] = [];
 	for (const m of html.matchAll(ROW_RE)) {
-		const [, id, jobMode, computerName, account, started, completed, c0, c1, c2, c3, result] = m;
+		const [
+			,
+			id,
+			jobMode,
+			userName,
+			loginName,
+			started,
+			completed,
+			bw,
+			fullColor,
+			twoColor,
+			singleColor,
+			result,
+			errorCause,
+			directAddress,
+			colorSetting,
+			paperSize,
+			duplexSetup
+		] = m;
 		const startedAt = parseDate(started);
 		if (!startedAt) continue;
 		rows.push({
 			printerJobId: Number(id),
 			jobMode: decodeEntities(jobMode),
-			computerName: decodeEntities(computerName),
-			accountCode: decodeEntities(account) === 'N/A' ? null : decodeEntities(account),
+			userName: decodeEntities(userName),
+			loginName: decodeOrNull(loginName),
 			startedAt,
 			completedAt: parseDate(completed),
-			totalCount: Number(c0) || 0,
-			bwCount: Number(c1) || 0,
-			colorCount: Number(c2) || 0,
-			unconfirmedFourthCount: Number(c3) || 0,
-			result: decodeEntities(result)
+			bwCount: parseCount(bw) ?? 0,
+			fullColorCount: parseCount(fullColor) ?? 0,
+			twoColorCount: parseCount(twoColor),
+			singleColorCount: parseCount(singleColor),
+			result: decodeEntities(result),
+			errorCause: decodeOrNull(errorCause),
+			directAddress: decodeOrNull(directAddress),
+			colorSetting: decodeOrNull(colorSetting),
+			paperSize: decodeOrNull(paperSize),
+			duplexSetup: decodeOrNull(duplexSetup)
 		});
 	}
 	return rows;

@@ -72,19 +72,20 @@ so that if Sharp OSA access is ever obtained later, only the printer/
 module needs to change -- `sync.ts` and everything above it just needs
 `fetchJobLog()` to keep returning the same shape.
 
-### ⚠️ Needs verification before trusting this for a real invoice
+### Column mapping (confirmed against the real printer)
 
-`jobLog.ts` has a detailed comment on this, but the short version: the
-Quick Job Log View returns 4 numeric columns without letting the column
-picker be used explicitly, and their exact meaning was inferred from a
-handful of real jobs observed during development (a B&W-heavy Copy job
-had its count in the 2nd position; total pages showed in the 1st for a
-Print job) rather than confirmed with a job of deliberately known B&W
-vs. color content. Before trusting a real bill on this: either print
-one deliberately-B&W and one deliberately-color test page and confirm
-which column moves, or switch to the full "Select Item" column picker
-on that page and request `Black & White Total Count` / `Full Color
-Total Count` by name.
+`jobLog.ts`'s column mapping was originally inferred from a handful of
+sample jobs and turned out to be wrong (there is no separate "total
+pages" cell, and the "computer name" column doesn't exist -- it's
+actually two separate columns, "User Name" and "Login Name"). It's now
+confirmed directly against the printer's own `<th>` headers on the Job
+Log page: `Job ID | Job Mode | User Name | Login Name | Date [Start,
+Complete] | Total Count [Black & White, Full Color, 2 Color, Single
+Color] | Result | Error Cause | Image Send Related Item [Direct
+Address] | Common Functionality [Color Setting] | Paper Select [Size]
+| Duplex Setup` -- 16 `<td>` cells per row in that order. "Total Count"
+is only a group heading over the 4 count columns; `printJob.totalCount`
+is just their sum.
 
 ### Sync
 

@@ -37,26 +37,38 @@ and assumed to work.
 
 ## Not done yet / needs your attention
 
-1. **⚠️ Verify the Job Log column mapping before trusting a real bill.**
-   This is the single most important thing to check first. See the big
-   comment at the top of `src/lib/server/printer/jobLog.ts` and the
-   "Needs verification" section in `docs/ARCHITECTURE.md`. The B&W/
-   Color counts are a best inference from a handful of real jobs, not
-   confirmed against deliberately-known content.
-2. **No `person` rows are seeded.** Only `598 = Will Reeves` is known
-   from the original conversation; there's no master roster anywhere.
-   Add everyone else via the People page once deployed, or find/build
-   a real roster to seed from.
+1. ~~Verify the Job Log column mapping before trusting a real bill.~~
+   **Done** -- the mapping was actually wrong (there's no "Computer
+   Name"/total-count column; the real columns are "User Name" +
+   "Login Name" separately, and 4 independent counts: Black & White,
+   Full Color, 2 Color, Single Color), confirmed directly against the
+   printer's own `<th>` headers. Schema and parser (`jobLog.ts`,
+   `schema.ts`, `sync.ts`) updated accordingly -- see
+   `docs/ARCHITECTURE.md`. **The `print_job` table should be truncated
+   (or the whole DB reset) before the next deploy/sync** so old rows
+   imported under the previous, incorrect mapping don't linger with
+   wrong B&W/color counts -- this is a one-time thing for this
+   migration, not a general practice.
+2. **No `person` rows are seeded**, and department-vs-person code
+   matching now has a fallback for this: `resolveCode()` in `sync.ts`
+   first tries a full person+department match, and if the specific
+   person isn't in the roster yet, falls back to identifying just the
+   department from the tail of the code (department codes are seeded
+   up front from the church's codes sheet, so this works before any
+   person is added). Per-department billing is accurate as soon as
+   codes sync; per-person assignment still needs the People page filled
+   in over time. Only `598 = Will Reeves` is known from the original
+   conversation as a real person row.
 3. **Never actually deployed to Coolify or a TrueNAS VM.** The Docker
    image and compose file are verified locally; the target-specific
    setup (Coolify resource config, TrueNAS VM networking/storage) is
    real work still to do -- see `docs/DEPLOYMENT.md`.
 4. **No tests written.** Given the scope of this session, priority went
    to building a real, running scaffold over test coverage. Worth adding
-   at minimum: a unit test for `matchCode()` (the code-splitting logic
-   in `sync.ts`) since it's easy to get subtly wrong and directly
-   affects billing accuracy, and one for `rateAt()` in `reporting.ts`
-   (the versioned-rate lookup).
+   at minimum: a unit test for `matchCode()`/`resolveCode()` (the
+   code-splitting logic in `sync.ts`) since it's easy to get subtly
+   wrong and directly affects billing accuracy, and one for `rateAt()`
+   in `reporting.ts` (the versioned-rate lookup).
 5. **UI is functional, not polished.** Tables/forms work but haven't
    had a design pass -- empty states, loading states, mobile layout,
    etc. are all bare-minimum.
@@ -75,6 +87,6 @@ and assumed to work.
 
 ## Where to start
 
-Item 1 above, then item 2 -- both are blocking for the dashboard to
-produce a trustworthy real invoice. Everything else is polish or new
-scope.
+Item 1's DB reset, then item 2 (adding real people over time) -- both
+matter for the dashboard to produce a trustworthy real invoice.
+Everything else is polish or new scope.

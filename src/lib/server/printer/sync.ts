@@ -29,6 +29,51 @@ export function matchCode(
 }
 
 /**
+ * Falls back to identifying just the department from the tail of a
+ * code, without needing to already know the specific person -- billing
+ * is per-department, and department codes are seeded up front (from
+ * the church's own codes sheet) well before every individual person's
+ * code is entered into the roster. Without this, every job would sit
+ * as fully "Unassigned" (including for billing) until someone got
+ * around to adding every person, even though which department to bill
+ * is already knowable from the code alone.
+ *
+ * Tries known department codes longest-first (so e.g. "611" -- Youth
+ * Sunday School -- wins over the shorter "61" -- Youth Dept. -- for a
+ * code ending in "611"), and only matches if there's at least one
+ * character left over for the person's own code, consistent with the
+ * personalCode+departmentCode concatenation scheme.
+ */
+function matchDepartmentBySuffix(
+	code: string,
+	departments: { id: number; code: string }[]
+): number | null {
+	const candidates = [...departments].sort((a, b) => b.code.length - a.code.length);
+	for (const dept of candidates) {
+		if (code.length > dept.code.length && code.endsWith(dept.code)) {
+			return dept.id;
+		}
+	}
+	return null;
+}
+
+/**
+ * Resolves a code to a person and/or department, preferring a full
+ * exact match (both person and department recognized) but falling back
+ * to a department-only match by suffix when the specific person isn't
+ * in the roster yet -- see matchDepartmentBySuffix.
+ */
+function resolveCode(
+	code: string,
+	people: { id: number; personalCode: string }[],
+	departments: { id: number; code: string }[]
+): { personId: number | null; departmentId: number | null } {
+	const full = matchCode(code, people, departments);
+	if (full.departmentId) return full;
+	return { personId: full.personId, departmentId: matchDepartmentBySuffix(code, departments) };
+}
+
+/**
  * Re-checks every already-imported job that's still missing a person or
  * department against the *current* people/department tables, and fixes
  * up any that now resolve. Needed because jobs get imported as soon as
@@ -41,11 +86,11 @@ export function matchCode(
  */
 export async function reconcileUnmatchedJobs(): Promise<number> {
 	const unmatched = await db
-		.select({ id: printJob.id, fullCode: printJob.fullCode })
+		.select({ id: printJob.id, loginName: printJob.loginName })
 		.from(printJob)
 		.where(
 			and(
-				isNotNull(printJob.fullCode),
+				isNotNull(printJob.loginName),
 				or(isNull(printJob.personId), isNull(printJob.departmentId))
 			)
 		);
@@ -58,9 +103,9 @@ export async function reconcileUnmatchedJobs(): Promise<number> {
 
 	let fixed = 0;
 	for (const job of unmatched) {
-		if (!job.fullCode) continue;
-		const match = matchCode(job.fullCode, people, departments);
-		if (match.personId && match.departmentId) {
+		if (!job.loginName || !isMatchableCode(job.loginName)) continue;
+		const match = resolveCode(job.loginName, people, departments);
+		if (match.personId || match.departmentId) {
 			await db
 				.update(printJob)
 				.set({ personId: match.personId, departmentId: match.departmentId })
@@ -69,6 +114,16 @@ export async function reconcileUnmatchedJobs(): Promise<number> {
 		}
 	}
 	return fixed;
+}
+
+/**
+ * "No Authentication" is the printer's own sentinel for walk-up jobs
+ * where nobody entered a login code at all -- it will never resolve to
+ * a person/department, so it shouldn't be treated as an unmatched code
+ * (which would otherwise get flagged on every single sync forever).
+ */
+function isMatchableCode(loginName: string): boolean {
+	return loginName !== 'No Authentication';
 }
 
 export interface SyncResult {
@@ -103,7 +158,21 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 		const stopAtOrBelowJobId = hasCompleteHistory ? (highest ?? 0) : 0;
 
 		const client = new PrinterClient();
-		const rows = await fetchJobLog(client, stopAtOrBelowJobId);
+		const fetchedRows = await fetchJobLog(client, stopAtOrBelowJobId);
+
+		// The printer's pagination can occasionally re-show the same job
+		// across two consecutive pages (e.g. a job landing right at a page
+		// boundary), so de-dupe by printerJobId before doing anything else.
+		// Without this, the same job can appear twice in `rows`, and since
+		// neither occurrence is in `existingIds` (both are "new"), the
+		// second insert would collide with the printer_job_id unique index
+		// and abort the whole sync after the first copy already committed.
+		const seenJobIds = new Set<number>();
+		const rows = fetchedRows.filter((r) => {
+			if (seenJobIds.has(r.printerJobId)) return false;
+			seenJobIds.add(r.printerJobId);
+			return true;
+		});
 
 		const existing = rows.length
 			? await db
@@ -130,25 +199,35 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 		for (const row of newRows) {
 			let personId: number | null = null;
 			let departmentId: number | null = null;
-			if (row.accountCode) {
-				const match = matchCode(row.accountCode, people, departments);
+			if (row.loginName && isMatchableCode(row.loginName)) {
+				const match = resolveCode(row.loginName, people, departments);
 				personId = match.personId;
 				departmentId = match.departmentId;
-				if (!personId || !departmentId) unmatchedCodes.push(row.accountCode);
+				if (!personId || !departmentId) unmatchedCodes.push(row.loginName);
 			}
+			const colorCount =
+				row.fullColorCount + (row.twoColorCount ?? 0) + (row.singleColorCount ?? 0);
 			await db.insert(printJob).values({
 				printerJobId: row.printerJobId,
 				jobMode: row.jobMode,
-				fullCode: row.accountCode,
+				loginName: row.loginName,
 				personId,
 				departmentId,
-				computerName: row.computerName,
+				userName: row.userName,
 				startedAt: row.startedAt,
 				completedAt: row.completedAt,
 				bwCount: row.bwCount,
-				colorCount: row.colorCount,
-				totalCount: row.totalCount,
-				result: row.result
+				colorCount,
+				totalCount: row.bwCount + colorCount,
+				fullColorCount: row.fullColorCount,
+				twoColorCount: row.twoColorCount,
+				singleColorCount: row.singleColorCount,
+				result: row.result,
+				errorCause: row.errorCause,
+				directAddress: row.directAddress,
+				colorSetting: row.colorSetting,
+				paperSize: row.paperSize,
+				duplexSetup: row.duplexSetup
 			});
 		}
 

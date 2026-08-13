@@ -8,12 +8,16 @@ export interface DepartmentUsage {
 	departmentLabel: string;
 	bwCount: number;
 	colorCount: number;
+	copierCostCents: number;
+	paperCostCents: number;
 	costCents: number;
 	people: {
 		personId: number | null;
 		name: string;
 		bwCount: number;
 		colorCount: number;
+		copierCostCents: number;
+		paperCostCents: number;
 		costCents: number;
 	}[];
 }
@@ -24,12 +28,14 @@ export interface UsageReport {
 	departments: DepartmentUsage[];
 	totalBwCount: number;
 	totalColorCount: number;
+	totalCopierCostCents: number;
+	totalPaperCostCents: number;
 	totalCostCents: number;
 }
 
 /** Finds whichever rate was in effect on the given date. Rates are sorted ascending by effectiveFrom by the caller. */
 function rateAt(
-	rates: { bwCostCents: number; colorCostCents: number; effectiveFrom: Date }[],
+	rates: { bwCostCents: number; colorCostCents: number; paperCostCents: number; effectiveFrom: Date }[],
 	date: Date
 ) {
 	let current = rates[0];
@@ -46,6 +52,7 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 		.select({
 			bwCostCents: rate.bwCostCents,
 			colorCostCents: rate.colorCostCents,
+			paperCostCents: rate.paperCostCents,
 			effectiveFrom: rate.effectiveFrom
 		})
 		.from(rate)
@@ -70,11 +77,17 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 	const byDept = new Map<string, DepartmentUsage>();
 	let totalBwCount = 0;
 	let totalColorCount = 0;
+	let totalCopierCostCents = 0;
+	let totalPaperCostCents = 0;
 	let totalCostCents = 0;
 
 	for (const job of jobs) {
-		const r = rates.length ? rateAt(rates, job.startedAt) : { bwCostCents: 0, colorCostCents: 0 };
-		const costCents = job.bwCount * r.bwCostCents + job.colorCount * r.colorCostCents;
+		const r = rates.length
+			? rateAt(rates, job.startedAt)
+			: { bwCostCents: 0, colorCostCents: 0, paperCostCents: 0 };
+		const copierCost = job.bwCount * r.bwCostCents + job.colorCount * r.colorCostCents;
+		const paperCost = (job.bwCount + job.colorCount) * r.paperCostCents;
+		const costCents = copierCost + paperCost;
 
 		const deptKey = job.departmentId ? String(job.departmentId) : 'unassigned';
 		if (!byDept.has(deptKey)) {
@@ -84,6 +97,8 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 				departmentLabel: job.departmentLabel ?? 'Unassigned / unmatched code',
 				bwCount: 0,
 				colorCount: 0,
+				copierCostCents: 0,
+				paperCostCents: 0,
 				costCents: 0,
 				people: []
 			});
@@ -91,6 +106,8 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 		const deptUsage = byDept.get(deptKey)!;
 		deptUsage.bwCount += job.bwCount;
 		deptUsage.colorCount += job.colorCount;
+		deptUsage.copierCostCents += copierCost;
+		deptUsage.paperCostCents += paperCost;
 		deptUsage.costCents += costCents;
 
 		const personKey = job.personId ? String(job.personId) : 'unassigned';
@@ -103,16 +120,22 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 				name: job.personName ?? 'Unknown',
 				bwCount: 0,
 				colorCount: 0,
+				copierCostCents: 0,
+				paperCostCents: 0,
 				costCents: 0
 			};
 			deptUsage.people.push(personUsage);
 		}
 		personUsage.bwCount += job.bwCount;
 		personUsage.colorCount += job.colorCount;
+		personUsage.copierCostCents += copierCost;
+		personUsage.paperCostCents += paperCost;
 		personUsage.costCents += costCents;
 
 		totalBwCount += job.bwCount;
 		totalColorCount += job.colorCount;
+		totalCopierCostCents += copierCost;
+		totalPaperCostCents += paperCost;
 		totalCostCents += costCents;
 	}
 
@@ -124,6 +147,8 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 		),
 		totalBwCount,
 		totalColorCount,
+		totalCopierCostCents,
+		totalPaperCostCents,
 		totalCostCents
 	};
 }

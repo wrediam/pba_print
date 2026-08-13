@@ -5,26 +5,50 @@ import { PrinterClient } from './client';
 import { fetchJobLog } from './jobLog';
 
 /**
- * Splits a printer account code (e.g. "59861") back into the person and
- * department it was built from (personalCode + departmentCode
- * concatenated, same scheme the macOS setup app uses). Tries every known
- * person's code as a prefix and checks whether the remainder is a known
- * department code. Ambiguous in theory if one person's code happens to
- * be a prefix of another's, but codes are assigned by church staff and
- * expected to be prefix-free in practice.
+ * Splits a printer account code back into the person and department that
+ * produced it. The copier uses two conventions depending on how accounts
+ * were set up:
+ *
+ *   Mode A (personal-first): personalCode + deptCode  e.g. "598"+"61" = "59861"
+ *   Mode B (dept-first):     deptCode + personalCode  e.g. "60"+"487" = "60487"
+ *
+ * Both modes are tried. For dept-first codes the printer sometimes
+ * zero-pads the dept prefix (e.g. stores dept "38" as "038"), so the
+ * lookup also strips leading zeros from the candidate prefix before
+ * matching against the department table.
  */
 export function matchCode(
 	code: string,
 	people: { id: number; personalCode: string }[],
 	departments: { id: number; code: string }[]
 ): { personId: number | null; departmentId: number | null } {
+	const deptByCode = new Map(departments.map((d) => [d.code, d]));
+	const personByCode = new Map(people.map((p) => [p.personalCode, p]));
+
+	// Mode A: personalCode prefix + deptCode suffix
 	for (const p of people) {
 		if (code.startsWith(p.personalCode)) {
 			const rest = code.slice(p.personalCode.length);
-			const dept = departments.find((d) => d.code === rest);
+			const dept = deptByCode.get(rest);
 			if (dept) return { personId: p.id, departmentId: dept.id };
 		}
 	}
+
+	// Mode B: deptCode prefix (possibly zero-padded) + personalCode suffix
+	// Try longest dept codes first to prefer more-specific matches.
+	const deptsByLength = [...departments].sort((a, b) => b.code.length - a.code.length);
+	for (const dept of deptsByLength) {
+		// Try both the raw dept code and a zero-padded version as prefix.
+		const prefixCandidates = new Set([dept.code, '0' + dept.code, '00' + dept.code]);
+		for (const prefix of prefixCandidates) {
+			if (code.startsWith(prefix) && code.length > prefix.length) {
+				const suffix = code.slice(prefix.length);
+				const person = personByCode.get(suffix);
+				if (person) return { personId: person.id, departmentId: dept.id };
+			}
+		}
+	}
+
 	return { personId: null, departmentId: null };
 }
 
@@ -116,14 +140,12 @@ export async function reconcileUnmatchedJobs(): Promise<number> {
 	return fixed;
 }
 
-/**
- * "No Authentication" is the printer's own sentinel for walk-up jobs
- * where nobody entered a login code at all -- it will never resolve to
- * a person/department, so it shouldn't be treated as an unmatched code
- * (which would otherwise get flagged on every single sync forever).
- */
+// Printer-internal accounts that will never resolve to a person/dept and
+// should not be flagged as "unmatched" on every sync.
+const SYSTEM_LOGIN_NAMES = new Set(['No Authentication', 'admin', 'service']);
+
 function isMatchableCode(loginName: string): boolean {
-	return loginName !== 'No Authentication';
+	return !SYSTEM_LOGIN_NAMES.has(loginName);
 }
 
 export interface SyncResult {

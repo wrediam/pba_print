@@ -1,0 +1,1 @@
+ALTER TABLE "rate" ADD COLUMN "paper_cost_cents" integer DEFAULT 0 NOT NULL;

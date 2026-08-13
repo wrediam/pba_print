@@ -131,7 +131,8 @@
 	</div>
 
 	<Card.Root>
-		<Card.Content>
+		<Card.Content class="p-0">
+			<div class="overflow-x-auto px-6 pb-6 pt-6">
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
@@ -277,7 +278,7 @@
 													? data.departments.find((d) => d.id === row.departmentId)?.label
 													: 'Department'}
 											</Select.Trigger>
-											<Select.Content>
+											<Select.Content class="max-h-64 overflow-y-auto">
 												<Select.Item value="">—</Select.Item>
 												{#each data.departments as d (d.id)}
 													<Select.Item value={String(d.id)}>{d.code} — {d.label}</Select.Item>
@@ -301,6 +302,7 @@
 					{/each}
 				</Table.Body>
 			</Table.Root>
+			</div>
 		</Card.Content>
 	</Card.Root>
 

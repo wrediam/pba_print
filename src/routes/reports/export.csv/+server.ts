@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	const report = await buildUsageReport(from, to);
 
 	const lines = [
-		['Department Code', 'Department', 'Person', 'B&W Copies', 'Color Copies', 'Cost'].join(',')
+		['Department Code', 'Department', 'Person', 'B&W Copies', 'Color Copies', 'Copier Cost', 'Paper Cost', 'Total Cost'].join(',')
 	];
 	for (const dept of report.departments) {
 		for (const p of dept.people) {
@@ -25,6 +25,8 @@ export const GET: RequestHandler = async ({ url }) => {
 					csvEscape(p.name),
 					csvEscape(p.bwCount),
 					csvEscape(p.colorCount),
+					csvEscape((p.copierCostCents / 100).toFixed(2)),
+					csvEscape((p.paperCostCents / 100).toFixed(2)),
 					csvEscape((p.costCents / 100).toFixed(2))
 				].join(',')
 			);
@@ -37,6 +39,8 @@ export const GET: RequestHandler = async ({ url }) => {
 			'',
 			report.totalBwCount,
 			report.totalColorCount,
+			(report.totalCopierCostCents / 100).toFixed(2),
+			(report.totalPaperCostCents / 100).toFixed(2),
 			(report.totalCostCents / 100).toFixed(2)
 		].join(',')
 	);

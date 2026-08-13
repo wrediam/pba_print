@@ -4,7 +4,9 @@ import { getSessionUser, SESSION_COOKIE } from '$lib/server/auth';
 import { startScheduler } from '$lib/server/scheduler';
 
 // Routes reachable without being logged in.
-const PUBLIC_PATHS = ['/login'];
+// /download-app is intentionally public so anyone on the network can
+// grab the macOS setup app without needing a login (IT, staff, etc.).
+const PUBLIC_PATHS = ['/login', '/download-app'];
 
 // Runs once when the server process starts (top-level module code, not
 // per-request) to begin the periodic printer sync.

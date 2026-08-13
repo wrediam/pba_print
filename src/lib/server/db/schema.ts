@@ -69,6 +69,7 @@ export const rate = pgTable('rate', {
 	id: serial('id').primaryKey(),
 	bwCostCents: integer('bw_cost_cents').notNull(),
 	colorCostCents: integer('color_cost_cents').notNull(),
+	paperCostCents: integer('paper_cost_cents').notNull().default(0),
 	effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull().defaultNow(),
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 });

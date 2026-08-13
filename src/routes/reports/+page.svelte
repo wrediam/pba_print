@@ -51,9 +51,9 @@
 						{dept.departmentLabel}
 					</Card.Title>
 					<Card.Description>
-						{dept.bwCount.toLocaleString()} B&amp;W · {dept.colorCount.toLocaleString()} Color · {formatCents(
-							dept.costCents
-						)}
+						{dept.bwCount.toLocaleString()} B&amp;W · {dept.colorCount.toLocaleString()} Color ·
+						Copier {formatCents(dept.copierCostCents)} · Paper {formatCents(dept.paperCostCents)} ·
+						<strong>Total {formatCents(dept.costCents)}</strong>
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>
@@ -63,7 +63,9 @@
 								<Table.Head>Person</Table.Head>
 								<Table.Head class="text-right">B&amp;W</Table.Head>
 								<Table.Head class="text-right">Color</Table.Head>
-								<Table.Head class="text-right">Cost</Table.Head>
+								<Table.Head class="text-right">Copier</Table.Head>
+								<Table.Head class="text-right">Paper</Table.Head>
+								<Table.Head class="text-right">Total</Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
@@ -72,7 +74,9 @@
 									<Table.Cell>{p.name}</Table.Cell>
 									<Table.Cell class="text-right">{p.bwCount.toLocaleString()}</Table.Cell>
 									<Table.Cell class="text-right">{p.colorCount.toLocaleString()}</Table.Cell>
-									<Table.Cell class="text-right">{formatCents(p.costCents)}</Table.Cell>
+									<Table.Cell class="text-right">{formatCents(p.copierCostCents)}</Table.Cell>
+									<Table.Cell class="text-right">{formatCents(p.paperCostCents)}</Table.Cell>
+									<Table.Cell class="text-right font-medium">{formatCents(p.costCents)}</Table.Cell>
 								</Table.Row>
 							{/each}
 						</Table.Body>
@@ -84,13 +88,25 @@
 		{/each}
 
 		<Card.Root>
-			<Card.Content class="flex items-center justify-between py-4 font-semibold">
-				<span>Total</span>
-				<span>
-					{data.report.totalBwCount.toLocaleString()} B&amp;W · {data.report.totalColorCount.toLocaleString()}
-					Color ·
-					{formatCents(data.report.totalCostCents)}
-				</span>
+			<Card.Content class="py-4 font-semibold">
+				<div class="flex items-center justify-between">
+					<span>Total</span>
+					<span class="text-right">
+						{data.report.totalBwCount.toLocaleString()} B&amp;W · {data.report.totalColorCount.toLocaleString()} Color
+					</span>
+				</div>
+				<div class="mt-1 flex items-center justify-between text-sm font-normal text-muted-foreground">
+					<span>Copier charges</span>
+					<span>{formatCents(data.report.totalCopierCostCents)}</span>
+				</div>
+				<div class="flex items-center justify-between text-sm font-normal text-muted-foreground">
+					<span>Paper / supplies</span>
+					<span>{formatCents(data.report.totalPaperCostCents)}</span>
+				</div>
+				<div class="mt-1 flex items-center justify-between border-t pt-1">
+					<span>Grand Total</span>
+					<span>{formatCents(data.report.totalCostCents)}</span>
+				</div>
 			</Card.Content>
 		</Card.Root>
 	</div>

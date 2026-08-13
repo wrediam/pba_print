@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import { department, person, printJob, syncRun } from '$lib/server/db/schema';
-import { and, eq, inArray, isNull, isNotNull, max, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, isNotNull, max, min, or } from 'drizzle-orm';
 import { PrinterClient } from './client';
 import { fetchJobLog } from './jobLog';
 
@@ -88,12 +88,22 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 	const [run] = await db.insert(syncRun).values({}).returning();
 
 	try {
-		const [{ highest } = { highest: null }] = await db
-			.select({ highest: max(printJob.printerJobId) })
+		const [{ highest, lowest } = { highest: null, lowest: null }] = await db
+			.select({ highest: max(printJob.printerJobId), lowest: min(printJob.printerJobId) })
 			.from(printJob);
 
+		// Only trust the "stop once we reach an already-known job ID"
+		// shortcut if our earliest imported job is #1 -- i.e. we actually
+		// hold the complete, gap-free history back to the start. If it's
+		// not (e.g. a partial/sparse import from an earlier bug, or this
+		// is the very first sync), fall back to a full pull so nothing
+		// gets silently skipped. Self-healing: no manual backfill/DB
+		// surgery ever needed if this situation comes up again.
+		const hasCompleteHistory = lowest === 1;
+		const stopAtOrBelowJobId = hasCompleteHistory ? (highest ?? 0) : 0;
+
 		const client = new PrinterClient();
-		const rows = await fetchJobLog(client, highest ?? 0);
+		const rows = await fetchJobLog(client, stopAtOrBelowJobId);
 
 		const existing = rows.length
 			? await db

@@ -2,13 +2,14 @@ import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { department, person, printJob } from '$lib/server/db/schema';
-import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gt, ilike, inArray, isNull, or } from 'drizzle-orm';
 
 const PAGE_SIZE = 100;
 
 export const load: PageServerLoad = async ({ url }) => {
 	const unmatchedOnly = url.searchParams.get('unmatched') === '1';
 	const page = Math.max(1, Number(url.searchParams.get('page') ?? '1'));
+	const q = url.searchParams.get('q')?.trim() ?? '';
 
 	const baseQuery = db
 		.select({
@@ -41,11 +42,22 @@ export const load: PageServerLoad = async ({ url }) => {
 		.leftJoin(person, eq(printJob.personId, person.id))
 		.leftJoin(department, eq(printJob.departmentId, department.id));
 
-	const rows = await (
-		unmatchedOnly
-			? baseQuery.where(and(gt(printJob.totalCount, 0), or(isNull(printJob.personId), isNull(printJob.departmentId))))
-			: baseQuery.where(gt(printJob.totalCount, 0))
-	)
+	const searchFilter = q
+		? or(
+				ilike(printJob.loginName, `%${q}%`),
+				ilike(printJob.userName, `%${q}%`),
+				ilike(person.name, `%${q}%`),
+				ilike(department.label, `%${q}%`),
+				ilike(department.code, `%${q}%`)
+			)
+		: undefined;
+
+	const matchFilter = unmatchedOnly
+		? or(isNull(printJob.personId), isNull(printJob.departmentId))
+		: undefined;
+
+	const rows = await baseQuery
+		.where(and(gt(printJob.totalCount, 0), matchFilter, searchFilter))
 		.orderBy(desc(printJob.startedAt))
 		.limit(PAGE_SIZE)
 		.offset((page - 1) * PAGE_SIZE);
@@ -58,7 +70,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			.orderBy(department.label)
 	]);
 
-	return { rows, people, departments, unmatchedOnly, page, pageSize: PAGE_SIZE };
+	return { rows, people, departments, unmatchedOnly, page, pageSize: PAGE_SIZE, q };
 };
 
 export const actions: Actions = {
@@ -73,5 +85,18 @@ export const actions: Actions = {
 		const departmentId = departmentIdRaw && departmentIdRaw !== '' ? Number(departmentIdRaw) : null;
 
 		await db.update(printJob).set({ personId, departmentId }).where(eq(printJob.id, jobId));
+	},
+
+	bulkAssign: async ({ request }) => {
+		const data = await request.formData();
+		const jobIds = data.getAll('jobId').map(Number).filter(Boolean);
+		const personIdRaw = data.get('personId');
+		const departmentIdRaw = data.get('departmentId');
+		if (!jobIds.length) return fail(400, { error: 'No jobs selected.' });
+
+		const personId = personIdRaw && personIdRaw !== '' ? Number(personIdRaw) : null;
+		const departmentId = departmentIdRaw && departmentIdRaw !== '' ? Number(departmentIdRaw) : null;
+
+		await db.update(printJob).set({ personId, departmentId }).where(inArray(printJob.id, jobIds));
 	}
 };

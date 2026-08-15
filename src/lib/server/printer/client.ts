@@ -108,26 +108,18 @@ export class PrinterClient {
 	/** Logs in as admin. Throws on failure. Safe to call again to refresh the session. */
 	async login(): Promise<void> {
 		this.cookie = '';
-		const { text: loginPage } = await this.requestFollowingRedirects('/');
-		let token2 = extractToken2(loginPage);
+		const { text: loginPage } = await this.requestFollowingRedirects('/login.html');
+		const token2 = extractToken2(loginPage);
 
-		const adminPage = await this.post('/login.html', {
-			loginbtn: '',
-			adminloginbtn: '',
-			'ggt_textbox(10007)': '',
-			action: 'adminloginbtn',
-			token2,
-			ordinate: '',
-			'ggt_hidden(10008)': '2'
-		});
-		token2 = extractToken2(adminPage);
-
+		// Firmware updated to a single-step login form (ggt_textbox(10003) = password,
+		// ggt_hidden(10008) = 4). The old two-step admin flow (adminloginbtn →
+		// ggt_textbox(10006)) no longer exists.
 		const result = await this.post('/login.html', {
-			'ggt_textbox(10006)': PRINTER_ADMIN_PASSWORD,
+			'ggt_textbox(10003)': PRINTER_ADMIN_PASSWORD,
 			action: 'loginbtn',
 			token2,
 			ordinate: '',
-			'ggt_hidden(10008)': '3'
+			'ggt_hidden(10008)': '4'
 		});
 
 		if (!result.includes('Machine Identification')) {

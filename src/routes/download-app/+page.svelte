@@ -27,7 +27,7 @@
 				<Card.Title>Download</Card.Title>
 			</Card.Header>
 			<Card.Content class="space-y-4">
-				<Button href="/download-app" download>Download Fix Church Printer.zip</Button>
+				<Button href="/download-app/file" download="Fix Church Printer.zip">Download Fix Church Printer.zip</Button>
 				<Alert.Root>
 					<Alert.Title>First launch on each Mac</Alert.Title>
 					<Alert.Description>

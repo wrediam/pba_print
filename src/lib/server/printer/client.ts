@@ -113,17 +113,7 @@ export class PrinterClient {
 
 		let result: string;
 
-		if (loginPage.includes('ggt_textbox(10003)')) {
-			// User auth OFF on the printer: single-step form with a combined
-			// username/password field (no admin-picker step needed).
-			result = await this.post('/login.html', {
-				'ggt_textbox(10003)': PRINTER_ADMIN_PASSWORD,
-				action: 'loginbtn',
-				token2,
-				ordinate: '',
-				'ggt_hidden(10008)': '4'
-			});
-		} else {
+		if (loginPage.includes('name="adminloginbtn"')) {
 			// User auth ON: two-step admin login. First POST selects the admin
 			// account, second POST submits the password (ggt_hidden(10008)=3
 			// signals the admin-password step to the printer's form handler).
@@ -139,6 +129,19 @@ export class PrinterClient {
 				token2: token2b,
 				ordinate: '',
 				'ggt_hidden(10008)': '3'
+			});
+		} else {
+			// User auth OFF: single-step form — ggt_textbox(10003) is the
+			// password field and ggt_hidden(10008)=4 signals the auth-off path.
+			// NOTE: ggt_textbox(10003) appears in the JS on BOTH pages but is
+			// only an actual <input> when auth is off, so we detect by the
+			// presence of the adminloginbtn button instead.
+			result = await this.post('/login.html', {
+				'ggt_textbox(10003)': PRINTER_ADMIN_PASSWORD,
+				action: 'loginbtn',
+				token2,
+				ordinate: '',
+				'ggt_hidden(10008)': '4'
 			});
 		}
 

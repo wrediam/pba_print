@@ -14,12 +14,19 @@
 
 import AdmZip from 'adm-zip';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { department } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 
-const TEMPLATE_PATH = 'static/app-template/template.zip';
+// In development: static/ is served from the project root (process.cwd() = repo root).
+// In production (Node adapter): static files are copied into build/client/ and the
+// server runs with WORKDIR=/app, so process.cwd() = /app.
+const TEMPLATE_PATH =
+	process.env.NODE_ENV === 'production'
+		? join(process.cwd(), 'build/client/app-template/template.zip')
+		: join(process.cwd(), 'static/app-template/template.zip');
 const RESOURCE_PATH = 'Fix Church Printer.app/Contents/Resources/department_codes.txt';
 
 export const GET: RequestHandler = async () => {

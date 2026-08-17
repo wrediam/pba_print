@@ -109,7 +109,21 @@ export const printJob = pgTable(
 		directAddress: text('direct_address'), // "Image Send Related Item" -- null if "N/A"
 		colorSetting: text('color_setting'), // "Common Functionality" -- e.g. "Auto" | "B/W" | "Full Color"
 		paperSize: text('paper_size'), // "Paper Select" -- null if "N/A"
+		paperType: text('paper_type'), // e.g. "Plain Paper 1" -- null if "N/A"
 		duplexSetup: text('duplex_setup'), // null if "N/A"
+		resolution: text('resolution'), // e.g. "600x600" -- null if "N/A"
+		// Additional fields from CSV export (not available in the old HTML scraper)
+		computerName: text('computer_name'), // sending PC's hostname -- null if "N/A"
+		fileName: text('file_name'), // document name sent to printer -- null if "N/A" / "No filing"
+		outputMode: text('output_mode'), // "Sort" | "Group" | ... -- null if "N/A"
+		staple: text('staple'), // "No Staple" | "1 staple" | ... -- null if "N/A"
+		stapleCount: integer('staple_count'), // null if N/A
+		punch: text('punch'), // "No Punch" | ... -- null if "N/A"
+		punchCount: integer('punch_count'), // null if N/A
+		completedSets: integer('completed_sets'), // copies completed -- null if N/A
+		completedPages: integer('completed_pages'), // pages completed -- null if N/A
+		originalCount: integer('original_count'), // original pages scanned -- null if N/A
+		originalSize: text('original_size'), // original document size -- null if "N/A"
 		syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(t) => [uniqueIndex('print_job_printer_job_id_idx').on(t.printerJobId)]

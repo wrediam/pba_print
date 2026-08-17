@@ -28,7 +28,20 @@ export interface PrinterJobLogRow {
 	directAddress: string | null; // null if N/A
 	colorSetting: string | null; // e.g. "Auto" | "B/W" | "Full Color", null if N/A
 	paperSize: string | null; // null if N/A
+	paperType: string | null; // e.g. "Plain Paper 1", null if N/A
 	duplexSetup: string | null; // null if N/A
+	resolution: string | null; // e.g. "600x600", null if N/A
+	computerName: string | null; // sending PC hostname, null if N/A
+	fileName: string | null; // document name, null if N/A / "No filing"
+	outputMode: string | null; // "Sort" | "Group" | ..., null if N/A
+	staple: string | null; // "No Staple" | "1 staple" | ..., null if N/A
+	stapleCount: number | null;
+	punch: string | null; // "No Punch" | ..., null if N/A
+	punchCount: number | null;
+	completedSets: number | null;
+	completedPages: number | null;
+	originalCount: number | null;
+	originalSize: string | null; // null if N/A
 }
 
 // selectItem bitmask matches the "select all fields" default from the
@@ -54,7 +67,20 @@ const WANTED_HEADERS: Record<string, keyof PrinterJobLogRow> = {
 	'Direct Address': 'directAddress',
 	'Color Setting': 'colorSetting',
 	'Paper Size': 'paperSize',
-	'Duplex Setup': 'duplexSetup'
+	'Paper Type': 'paperType',
+	'Duplex Setup': 'duplexSetup',
+	Resolution: 'resolution',
+	'Computer Name': 'computerName',
+	'File Name': 'fileName',
+	Output: 'outputMode',
+	Staple: 'staple',
+	'Staple Count': 'stapleCount',
+	Punch: 'punch',
+	'Punch Count': 'punchCount',
+	'Number of Completed Sets': 'completedSets',
+	'Number of Completed Pages': 'completedPages',
+	'Original Count': 'originalCount',
+	'Original Size': 'originalSize'
 };
 
 // Minimal RFC-4180 CSV parser. Handles quoted fields (including embedded
@@ -163,7 +189,20 @@ function parseCsvRows(csv: string): PrinterJobLogRow[] {
 			directAddress: nullable(get(cols, 'directAddress')),
 			colorSetting: nullable(get(cols, 'colorSetting')),
 			paperSize: nullable(get(cols, 'paperSize')),
-			duplexSetup: nullable(get(cols, 'duplexSetup'))
+			paperType: nullable(get(cols, 'paperType')),
+			duplexSetup: nullable(get(cols, 'duplexSetup')),
+			resolution: nullable(get(cols, 'resolution')),
+			computerName: nullable(get(cols, 'computerName')),
+			fileName: nullable(get(cols, 'fileName')),
+			outputMode: nullable(get(cols, 'outputMode')),
+			staple: nullable(get(cols, 'staple')),
+			stapleCount: parseCount(get(cols, 'stapleCount')),
+			punch: nullable(get(cols, 'punch')),
+			punchCount: parseCount(get(cols, 'punchCount')),
+			completedSets: parseCount(get(cols, 'completedSets')),
+			completedPages: parseCount(get(cols, 'completedPages')),
+			originalCount: parseCount(get(cols, 'originalCount')),
+			originalSize: nullable(get(cols, 'originalSize'))
 		});
 	}
 	return rows;

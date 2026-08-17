@@ -42,8 +42,21 @@
 		{ key: 'errorCause', label: 'Error Cause' },
 		{ key: 'colorSetting', label: 'Color Setting' },
 		{ key: 'paperSize', label: 'Paper Size' },
+		{ key: 'paperType', label: 'Paper Type' },
 		{ key: 'duplexSetup', label: 'Duplex' },
+		{ key: 'resolution', label: 'Resolution' },
 		{ key: 'directAddress', label: 'Direct Address' },
+		{ key: 'computerName', label: 'Computer Name' },
+		{ key: 'fileName', label: 'File Name' },
+		{ key: 'outputMode', label: 'Output Mode' },
+		{ key: 'staple', label: 'Staple' },
+		{ key: 'stapleCount', label: 'Staple Count' },
+		{ key: 'punch', label: 'Punch' },
+		{ key: 'punchCount', label: 'Punch Count' },
+		{ key: 'completedSets', label: 'Completed Sets' },
+		{ key: 'completedPages', label: 'Completed Pages' },
+		{ key: 'originalCount', label: 'Original Count' },
+		{ key: 'originalSize', label: 'Original Size' },
 		{ key: 'printerJobId', label: 'Job ID' }
 	] as const;
 	type ColumnKey = (typeof ALL_COLUMNS)[number]['key'];
@@ -227,8 +240,21 @@
 							{#if isVisible('errorCause')}<Table.Head>Error Cause</Table.Head>{/if}
 							{#if isVisible('colorSetting')}<Table.Head>Color Setting</Table.Head>{/if}
 							{#if isVisible('paperSize')}<Table.Head>Paper Size</Table.Head>{/if}
+							{#if isVisible('paperType')}<Table.Head>Paper Type</Table.Head>{/if}
 							{#if isVisible('duplexSetup')}<Table.Head>Duplex</Table.Head>{/if}
+							{#if isVisible('resolution')}<Table.Head>Resolution</Table.Head>{/if}
 							{#if isVisible('directAddress')}<Table.Head>Direct Address</Table.Head>{/if}
+							{#if isVisible('computerName')}<Table.Head>Computer Name</Table.Head>{/if}
+							{#if isVisible('fileName')}<Table.Head>File Name</Table.Head>{/if}
+							{#if isVisible('outputMode')}<Table.Head>Output Mode</Table.Head>{/if}
+							{#if isVisible('staple')}<Table.Head>Staple</Table.Head>{/if}
+							{#if isVisible('stapleCount')}<Table.Head class="text-right">Staple Count</Table.Head>{/if}
+							{#if isVisible('punch')}<Table.Head>Punch</Table.Head>{/if}
+							{#if isVisible('punchCount')}<Table.Head class="text-right">Punch Count</Table.Head>{/if}
+							{#if isVisible('completedSets')}<Table.Head class="text-right">Completed Sets</Table.Head>{/if}
+							{#if isVisible('completedPages')}<Table.Head class="text-right">Completed Pages</Table.Head>{/if}
+							{#if isVisible('originalCount')}<Table.Head class="text-right">Original Count</Table.Head>{/if}
+							{#if isVisible('originalSize')}<Table.Head>Original Size</Table.Head>{/if}
 							{#if isVisible('printerJobId')}<Table.Head>Job ID</Table.Head>{/if}
 							<Table.Head class="w-72"></Table.Head>
 						</Table.Row>
@@ -312,11 +338,50 @@
 								{#if isVisible('paperSize')}
 									<Table.Cell>{row.paperSize ?? '—'}</Table.Cell>
 								{/if}
+								{#if isVisible('paperType')}
+									<Table.Cell>{row.paperType ?? '—'}</Table.Cell>
+								{/if}
 								{#if isVisible('duplexSetup')}
 									<Table.Cell>{row.duplexSetup ?? '—'}</Table.Cell>
 								{/if}
+								{#if isVisible('resolution')}
+									<Table.Cell>{row.resolution ?? '—'}</Table.Cell>
+								{/if}
 								{#if isVisible('directAddress')}
 									<Table.Cell>{row.directAddress ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('computerName')}
+									<Table.Cell>{row.computerName ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('fileName')}
+									<Table.Cell class="max-w-48 truncate">{row.fileName ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('outputMode')}
+									<Table.Cell>{row.outputMode ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('staple')}
+									<Table.Cell>{row.staple ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('stapleCount')}
+									<Table.Cell class="text-right">{row.stapleCount ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('punch')}
+									<Table.Cell>{row.punch ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('punchCount')}
+									<Table.Cell class="text-right">{row.punchCount ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('completedSets')}
+									<Table.Cell class="text-right">{row.completedSets ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('completedPages')}
+									<Table.Cell class="text-right">{row.completedPages ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('originalCount')}
+									<Table.Cell class="text-right">{row.originalCount ?? '—'}</Table.Cell>
+								{/if}
+								{#if isVisible('originalSize')}
+									<Table.Cell>{row.originalSize ?? '—'}</Table.Cell>
 								{/if}
 								{#if isVisible('printerJobId')}
 									<Table.Cell class="font-mono text-muted-foreground">{row.printerJobId}</Table.Cell>

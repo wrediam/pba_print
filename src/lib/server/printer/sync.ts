@@ -255,7 +255,20 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 				directAddress: row.directAddress,
 				colorSetting: row.colorSetting,
 				paperSize: row.paperSize,
-				duplexSetup: row.duplexSetup
+				paperType: row.paperType,
+				duplexSetup: row.duplexSetup,
+				resolution: row.resolution,
+				computerName: row.computerName,
+				fileName: row.fileName,
+				outputMode: row.outputMode,
+				staple: row.staple,
+				stapleCount: row.stapleCount,
+				punch: row.punch,
+				punchCount: row.punchCount,
+				completedSets: row.completedSets,
+				completedPages: row.completedPages,
+				originalCount: row.originalCount,
+				originalSize: row.originalSize
 			});
 		}
 

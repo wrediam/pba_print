@@ -1,29 +1,16 @@
-// Parses the printer's "Quick Job Log View" (System Settings > System
-// Control > Job Log > View Job Log > "Quick Job Log View(G)" button),
-// paginating through as much history as needed.
+// Fetches the printer job log as CSV via the direct download endpoint
+// instead of scraping the paginated HTML Job Log view. One request
+// returns every record; columns are resolved by header name so new
+// firmware columns don't shift offsets and break parsing.
 //
-// Column mapping confirmed directly against the printer's own table
-// headers (`<th>` cells on the Job Log page), not inferred from sample
-// data -- see the two-row header:
-//   Job ID | Job Mode | User Name | Login Name | Date [Start, Complete]
-//   | Total Count [Black & White, Full Color, 2 Color, Single Color]
-//   | Result | Error Cause | Image Send Related Item [Direct Address]
-//   | Common Functionality [Color Setting] | Paper Select [Size]
-//   | Duplex Setup
-// That's 16 <td> cells per row, in that exact order. "Total Count" is
-// only a group heading over the 4 count columns -- there's no separate
-// overall total cell, so callers sum whichever of the 4 apply.
+// Endpoint:
+//   /joblog_download.html?format=0&order=1&selectItem=<bitmask>&date=0&delAfterSave=0
+//   format=0 → CSV, order=1 → ascending Job ID, date=0 → all dates.
+//
+// Session: still requires the admin login cookie set by PrinterClient.login().
 
 import { APP_TIMEZONE, zonedWallTimeToUtc } from '$lib/server/tz';
 import type { PrinterClient } from './client';
-
-// The printer's Job Log timestamps have no timezone info (e.g.
-// "2026-08-13T10:00:22" is its own local wall-clock reading, not UTC),
-// but this app typically runs on a server set to UTC -- naively parsing
-// with `new Date(s)` would silently interpret that wall-clock time as
-// UTC and shift every job by the church's UTC offset. APP_TIMEZONE
-// (env: PRINTER_TIMEZONE) tells parseDate what IANA zone those strings
-// are actually in.
 
 export interface PrinterJobLogRow {
 	printerJobId: number;
@@ -34,85 +21,88 @@ export interface PrinterJobLogRow {
 	completedAt: Date | null;
 	bwCount: number; // Black & White Total Count
 	fullColorCount: number; // Full Color Total Count
-	twoColorCount: number | null; // 2 Color Total Count, or null if "N/A" (not applicable to this job mode)
-	singleColorCount: number | null; // Single Color Total Count, or null if "N/A"
+	twoColorCount: number | null; // 2 Color Total Count, or null if N/A
+	singleColorCount: number | null; // Single Color Total Count, or null if N/A
 	result: string;
-	errorCause: string | null; // null if "N/A"
-	directAddress: string | null; // "Image Send Related Item" -- null if "N/A"
-	colorSetting: string | null; // "Common Functionality" -- e.g. "Auto" | "B/W" | "Full Color"
-	paperSize: string | null; // "Paper Select" -- null if "N/A"
-	duplexSetup: string | null; // null if "N/A"
+	errorCause: string | null; // null if N/A
+	directAddress: string | null; // null if N/A
+	colorSetting: string | null; // e.g. "Auto" | "B/W" | "Full Color", null if N/A
+	paperSize: string | null; // null if N/A
+	duplexSetup: string | null; // null if N/A
 }
 
-const ROW_RE =
-	/<tr>\s*<td>(\d+)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g;
+// selectItem bitmask matches the "select all fields" default from the
+// printer's own export UI. Only the columns we care about need to be
+// present; extra columns are ignored by the name-based parser.
+const CSV_PATH =
+	'/joblog_download.html?format=0&order=1&selectItem=1101111111101111111111111111111111111111111101111111111111111111&date=0&delAfterSave=0';
 
-// Hidden inputs on this printer's pages appear in two different
-// attribute orders -- token1/token2/action/ordinate as
-// `type="hidden" name="X" value="Y"`, but the ~70 ggt_checkbox/
-// ggt_radio/ggt_selhidden column-selection fields as
-// `name="X" type="hidden" value="Y"` (name before type). Matching the
-// whole tag first and pulling name/value out of it, order-independent,
-// catches both -- an earlier version only matched the first ordering
-// and silently dropped most of the form state, which broke pagination.
-const HIDDEN_TAG_RE = /<input\s+[^>]*type="hidden"[^>]*>/g;
-const NAME_ATTR_RE = /name\s*=\s*"([^"]+)"/;
-const VALUE_ATTR_RE = /value\s*=\s*"([^"]*)"/;
-const SELECT_RE = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
-const OPTION_SELECTED_RE = /<option\s+value="([^"]*)"\s+selected/;
+// CSV column header → field we want. Every other column is ignored.
+const WANTED_HEADERS: Record<string, keyof PrinterJobLogRow> = {
+	'Job ID': 'printerJobId',
+	'Job Mode': 'jobMode',
+	'User Name': 'userName',
+	'Login Name': 'loginName',
+	'Starting Date & Time': 'startedAt',
+	'Completing Date & Time': 'completedAt',
+	'Black & White Total Count': 'bwCount',
+	'Full Color Total Count': 'fullColorCount',
+	'2-Color Total Count': 'twoColorCount',
+	'Single Color Total Count': 'singleColorCount',
+	Result: 'result',
+	'Error Cause': 'errorCause',
+	'Direct Address': 'directAddress',
+	'Color Setting': 'colorSetting',
+	'Paper Size': 'paperSize',
+	'Duplex Setup': 'duplexSetup'
+};
 
-/**
- * Pulls every current hidden field and every select's currently-chosen
- * option out of a page, so a follow-up POST (e.g. clicking "Next") can
- * echo the entire form state back unchanged except for whatever we're
- * deliberately overriding. This printer's pages require the full state
- * to be resubmitted or pagination silently doesn't advance -- confirmed
- * necessary the hard way earlier in this project (see account_userlist
- * scraping notes).
- */
-function extractFormState(html: string): Record<string, string> {
-	const state: Record<string, string> = {};
-	for (const tag of html.match(HIDDEN_TAG_RE) ?? []) {
-		const name = tag.match(NAME_ATTR_RE)?.[1];
-		const value = tag.match(VALUE_ATTR_RE)?.[1] ?? '';
-		if (name) state[name] = value;
+// Minimal RFC-4180 CSV parser. Handles quoted fields (including embedded
+// commas and doubled-quote escapes). Returns an array of rows, each row
+// an array of unquoted field strings.
+function parseCSV(text: string): string[][] {
+	const rows: string[][] = [];
+	let row: string[] = [];
+	let field = '';
+	let inQuotes = false;
+
+	// Strip BOM if present
+	const src = text.startsWith('﻿') ? text.slice(1) : text;
+
+	for (let i = 0; i < src.length; i++) {
+		const c = src[i];
+		if (inQuotes) {
+			if (c === '"' && src[i + 1] === '"') {
+				field += '"';
+				i++;
+			} else if (c === '"') {
+				inQuotes = false;
+			} else {
+				field += c;
+			}
+		} else if (c === '"') {
+			inQuotes = true;
+		} else if (c === ',') {
+			row.push(field);
+			field = '';
+		} else if (c === '\n') {
+			row.push(field);
+			if (row.some((f) => f !== '')) rows.push(row);
+			row = [];
+			field = '';
+		} else if (c !== '\r') {
+			field += c;
+		}
 	}
-	for (const m of html.matchAll(SELECT_RE)) {
-		const [, name, body] = m;
-		const selected = body.match(OPTION_SELECTED_RE);
-		if (selected) state[name] = selected[1];
+	if (row.length > 0 || field !== '') {
+		row.push(field);
+		if (row.some((f) => f !== '')) rows.push(row);
 	}
-	return state;
-}
-
-function isNextDisabled(html: string): boolean {
-	const m = html.match(/<input name="nextbtn"[^>]*>/);
-	return !m || m[0].includes('disabled');
-}
-
-function decodeEntities(s: string): string {
-	return s
-		.replace(/&nbsp;/g, ' ')
-		.replace(/&amp;/g, '&')
-		.trim();
-}
-
-/** Decodes entities and normalizes the printer's "N/A" placeholder to null. */
-function decodeOrNull(s: string): string | null {
-	const decoded = decodeEntities(s);
-	return decoded === 'N/A' ? null : decoded;
-}
-
-/** Parses one of the 4 count columns: "N/A" means not applicable to this job's mode, not zero. */
-function parseCount(s: string): number | null {
-	const t = s.trim();
-	if (t === 'N/A') return null;
-	return Number(t) || 0;
+	return rows;
 }
 
 const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
 
-/** Parses one of the printer's naive local timestamps as APP_TIMEZONE wall-clock time. */
 function parseDate(s: string): Date | null {
 	const m = s.trim().match(NAIVE_DATETIME_RE);
 	if (!m) return null;
@@ -120,93 +110,76 @@ function parseDate(s: string): Date | null {
 	return zonedWallTimeToUtc(y, mo, d, h, mi, se, APP_TIMEZONE);
 }
 
-function parseRows(html: string): PrinterJobLogRow[] {
+function nullable(s: string): string | null {
+	const t = s.trim();
+	return t === 'N/A' || t === '' ? null : t;
+}
+
+function parseCount(s: string): number | null {
+	const t = s.trim();
+	if (t === 'N/A' || t === '') return null;
+	return Number(t) || 0;
+}
+
+function parseCsvRows(csv: string): PrinterJobLogRow[] {
+	const parsed = parseCSV(csv);
+	if (parsed.length < 2) return [];
+
+	// Build a map from header name to column index
+	const headers = parsed[0];
+	const colIdx: Partial<Record<keyof PrinterJobLogRow, number>> = {};
+	for (let i = 0; i < headers.length; i++) {
+		const field = WANTED_HEADERS[headers[i]];
+		if (field) colIdx[field] = i;
+	}
+
+	const get = (row: string[], field: keyof PrinterJobLogRow) => {
+		const i = colIdx[field];
+		return i !== undefined ? (row[i] ?? '') : '';
+	};
+
 	const rows: PrinterJobLogRow[] = [];
-	for (const m of html.matchAll(ROW_RE)) {
-		const [
-			,
-			id,
-			jobMode,
-			userName,
-			loginName,
-			started,
-			completed,
-			bw,
-			fullColor,
-			twoColor,
-			singleColor,
-			result,
-			errorCause,
-			directAddress,
-			colorSetting,
-			paperSize,
-			duplexSetup
-		] = m;
-		const startedAt = parseDate(started);
+	for (let i = 1; i < parsed.length; i++) {
+		const cols = parsed[i];
+		const idStr = get(cols, 'printerJobId').trim();
+		if (!idStr || !/^\d+$/.test(idStr)) continue;
+
+		const startedAt = parseDate(get(cols, 'startedAt'));
 		if (!startedAt) continue;
+
 		rows.push({
-			printerJobId: Number(id),
-			jobMode: decodeEntities(jobMode),
-			userName: decodeEntities(userName),
-			loginName: decodeOrNull(loginName),
+			printerJobId: Number(idStr),
+			jobMode: get(cols, 'jobMode').trim(),
+			userName: get(cols, 'userName').trim(),
+			loginName: nullable(get(cols, 'loginName')),
 			startedAt,
-			completedAt: parseDate(completed),
-			bwCount: parseCount(bw) ?? 0,
-			fullColorCount: parseCount(fullColor) ?? 0,
-			twoColorCount: parseCount(twoColor),
-			singleColorCount: parseCount(singleColor),
-			result: decodeEntities(result),
-			errorCause: decodeOrNull(errorCause),
-			directAddress: decodeOrNull(directAddress),
-			colorSetting: decodeOrNull(colorSetting),
-			paperSize: decodeOrNull(paperSize),
-			duplexSetup: decodeOrNull(duplexSetup)
+			completedAt: parseDate(get(cols, 'completedAt')),
+			bwCount: parseCount(get(cols, 'bwCount')) ?? 0,
+			fullColorCount: parseCount(get(cols, 'fullColorCount')) ?? 0,
+			twoColorCount: parseCount(get(cols, 'twoColorCount')),
+			singleColorCount: parseCount(get(cols, 'singleColorCount')),
+			result: get(cols, 'result').trim(),
+			errorCause: nullable(get(cols, 'errorCause')),
+			directAddress: nullable(get(cols, 'directAddress')),
+			colorSetting: nullable(get(cols, 'colorSetting')),
+			paperSize: nullable(get(cols, 'paperSize')),
+			duplexSetup: nullable(get(cols, 'duplexSetup'))
 		});
 	}
 	return rows;
 }
 
-const MAX_PAGES = 200; // safety cap -- at 500/page that's 100,000 jobs, far more than this log will ever hold
-
 /**
- * Fetches the Job Log, paginating as needed. Jobs are sorted newest-
- * first by default, which this relies on: pass `stopAtOrBelowJobId` (the
- * highest printerJobId already imported) to stop paginating as soon as
- * a page's jobs drop to or below that ID, rather than re-walking the
- * entire history on every sync. Omit it (or pass 0) to pull everything
- * available -- used for the very first sync against an empty database.
+ * Downloads the full job log CSV and returns parsed rows. Pass
+ * `stopAtOrBelowJobId` (the highest printerJobId already in the DB) to
+ * filter out already-imported records -- same contract as before, just
+ * applied as a post-filter instead of a mid-scrape early stop.
  */
 export async function fetchJobLog(
 	client: PrinterClient,
 	stopAtOrBelowJobId = 0
 ): Promise<PrinterJobLogRow[]> {
-	// Land on the Quick Job Log View, then bump "Display Items" to its max
-	// (500) so a several-thousand-entry log only takes a handful of pages
-	// instead of hundreds at the default 10/page.
-	let html = await client.submitForm('/sysmgt_joblog_view.html', {
-		JoblogSelectWebChange: '',
-		action: 'simpledisplaybtn'
-	});
-	let state = extractFormState(html);
-	state['ggt_select(118)'] = '5'; // 500 items
-	html = await client.post('/sysmgt_joblog_view.html', { ...state, action: 'ggt_select(118)' });
-
-	const allRows: PrinterJobLogRow[] = [];
-	for (let page = 1; page <= MAX_PAGES; page++) {
-		const rows = parseRows(html);
-		if (rows.length === 0) break;
-		allRows.push(...rows);
-
-		const reachedKnownJobs =
-			stopAtOrBelowJobId > 0 && rows.every((r) => r.printerJobId <= stopAtOrBelowJobId);
-		if (reachedKnownJobs || isNextDisabled(html)) break;
-
-		state = extractFormState(html);
-		html = await client.post('/sysmgt_joblog_view.html', { ...state, action: 'nextbtn' });
-	}
-
-	if (stopAtOrBelowJobId > 0) {
-		return allRows.filter((r) => r.printerJobId > stopAtOrBelowJobId);
-	}
-	return allRows;
+	const csv = await client.get(CSV_PATH);
+	const rows = parseCsvRows(csv);
+	return stopAtOrBelowJobId > 0 ? rows.filter((r) => r.printerJobId > stopAtOrBelowJobId) : rows;
 }

@@ -111,16 +111,34 @@ export class PrinterClient {
 		const { text: loginPage } = await this.requestFollowingRedirects('/login.html');
 		const token2 = extractToken2(loginPage);
 
-		// Firmware updated to a single-step login form (ggt_textbox(10003) = password,
-		// ggt_hidden(10008) = 4). The old two-step admin flow (adminloginbtn →
-		// ggt_textbox(10006)) no longer exists.
-		const result = await this.post('/login.html', {
-			'ggt_textbox(10003)': PRINTER_ADMIN_PASSWORD,
-			action: 'loginbtn',
-			token2,
-			ordinate: '',
-			'ggt_hidden(10008)': '4'
-		});
+		let result: string;
+
+		if (loginPage.includes('ggt_textbox(10003)')) {
+			// User auth OFF on the printer: single-step form with a combined
+			// username/password field (no admin-picker step needed).
+			result = await this.post('/login.html', {
+				'ggt_textbox(10003)': PRINTER_ADMIN_PASSWORD,
+				action: 'loginbtn',
+				token2,
+				ordinate: '',
+				'ggt_hidden(10008)': '4'
+			});
+		} else {
+			// User auth ON: two-step admin login. First POST selects the admin
+			// account, second POST submits the password.
+			const step1 = await this.post('/login.html', {
+				action: 'adminloginbtn',
+				token2,
+				ordinate: ''
+			});
+			const token2b = extractToken2(step1);
+			result = await this.post('/login.html', {
+				'ggt_textbox(10006)': PRINTER_ADMIN_PASSWORD,
+				action: 'loginbtn',
+				token2: token2b,
+				ordinate: ''
+			});
+		}
 
 		if (!result.includes('Machine Identification')) {
 			throw new Error('Printer admin login failed -- check PRINTER_ADMIN_PASSWORD');

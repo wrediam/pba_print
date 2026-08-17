@@ -67,6 +67,8 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 			personName: person.name,
 			bwCount: printJob.bwCount,
 			colorCount: printJob.colorCount,
+			totalCount: printJob.totalCount,
+			duplexSetup: printJob.duplexSetup,
 			startedAt: printJob.startedAt
 		})
 		.from(printJob)
@@ -93,7 +95,11 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 			? rateAt(rates, job.startedAt)
 			: { bwCostCents: 0, colorCostCents: 0, paperCostCents: 0 };
 		const copierCost = job.bwCount * r.bwCostCents + job.colorCount * r.colorCostCents;
-		const paperCost = (job.bwCount + job.colorCount) * r.paperCostCents;
+		// Duplex jobs use one sheet per two impressions -- paper cost is per sheet,
+		// not per impression. "2-Sided" in duplexSetup means both sides are used.
+		const isDuplex = job.duplexSetup?.includes('2-Sided') ?? false;
+		const sheetCount = isDuplex ? Math.ceil(job.totalCount / 2) : job.totalCount;
+		const paperCost = sheetCount * r.paperCostCents;
 		const costCents = copierCost + paperCost;
 
 		const deptKey = job.departmentId ? String(job.departmentId) : 'unassigned';

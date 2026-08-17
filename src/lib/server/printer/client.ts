@@ -125,7 +125,8 @@ export class PrinterClient {
 			});
 		} else {
 			// User auth ON: two-step admin login. First POST selects the admin
-			// account, second POST submits the password.
+			// account, second POST submits the password (ggt_hidden(10008)=3
+			// signals the admin-password step to the printer's form handler).
 			const step1 = await this.post('/login.html', {
 				action: 'adminloginbtn',
 				token2,
@@ -136,7 +137,8 @@ export class PrinterClient {
 				'ggt_textbox(10006)': PRINTER_ADMIN_PASSWORD,
 				action: 'loginbtn',
 				token2: token2b,
-				ordinate: ''
+				ordinate: '',
+				'ggt_hidden(10008)': '3'
 			});
 		}
 

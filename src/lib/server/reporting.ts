@@ -96,8 +96,17 @@ export async function buildUsageReport(from: Date, to: Date): Promise<UsageRepor
 			: { bwCostCents: 0, colorCostCents: 0, paperCostCents: 0 };
 		const copierCost = job.bwCount * r.bwCostCents + job.colorCount * r.colorCostCents;
 		// Duplex jobs use one sheet per two impressions -- paper cost is per sheet,
-		// not per impression. "2-Sided" in duplexSetup means both sides are used.
-		const isDuplex = job.duplexSetup?.includes('2-Sided') ?? false;
+		// not per impression. Output is duplex when duplexSetup indicates both
+		// sides of the paper are printed (confirmed against live data):
+		//   "2-Sided Booklet" / "2-Sided Tablet" → contains "2-Sided"
+		//   "2-Side to 2-Side" / "1-Side to 2-Side" → contains "to 2-Side"
+		//   "Booklet" → exact match
+		// "2-Side to 1-Side" is 2-sided originals to 1-sided output (simplex).
+		const isDuplex =
+			!!job.duplexSetup &&
+			(job.duplexSetup.includes('2-Sided') ||
+				job.duplexSetup.includes('to 2-Side') ||
+				job.duplexSetup === 'Booklet');
 		const sheetCount = isDuplex ? Math.ceil(job.totalCount / 2) : job.totalCount;
 		const paperCost = sheetCount * r.paperCostCents;
 		const costCents = copierCost + paperCost;

@@ -69,7 +69,7 @@ interface ProvisionRequest {
 	personCode: string;
 	departmentCode: string;
 	departmentLabel?: string;
-	colorMode?: 'CMBW' | 'CMAuto'; // defaults to CMBW -- see note in provisionQueue
+	colorMode?: 'CMBW' | 'CMAuto' | 'CMColor'; // defaults to CMAuto -- see note in provisionQueue
 }
 
 interface ProvisionResult {
@@ -127,8 +127,24 @@ async function provisionQueue(req: ProvisionRequest): Promise<ProvisionResult> {
 			'-D',
 			description,
 			...HARDWARE_OPTS,
+			// ARCMode is the account's *color restriction*, not the per-job
+			// color choice:
+			//   CMAuto -- (the PPD's own default) let each job carry color
+			//             only when the user explicitly selects it in the
+			//             print dialog. This is the standing decision: every
+			//             department gets color.
+			//   CMBW   -- force mono regardless of the dialog (still passable
+			//             per-queue via colorMode for a mono-only department).
+			// IMPORTANT copier-side dependency: the copier enforces a
+			// per-department *color authority*. A CMAuto job that asks for
+			// color from a department NOT granted color authority is rejected
+			// outright with Sharp error 0435 (documented from the field in the
+			// macOS installer's add_profile_queue.sh). Defaulting to CMAuto
+			// assumes the office has granted color authority to every
+			// department on the copier -- if one is left mono-only there,
+			// pass colorMode:'CMBW' for its queue so its color jobs don't 0435.
 			'-o',
-			`ARCMode=${req.colorMode ?? 'CMBW'}`,
+			`ARCMode=${req.colorMode ?? 'CMAuto'}`,
 			'-o',
 			`JCLUserNumber=Custom.${fullCode}`
 		]);
@@ -180,6 +196,126 @@ async function removeQueue(personCode: string, departmentCode: string): Promise<
 	});
 }
 
+interface QueueSummary {
+	queueName: string;
+	description: string;
+	deviceUri: string;
+	accepting: boolean;
+	enabled: boolean;
+	jclUserNumber: string | null; // the account code baked into the queue, read from its compiled PPD
+}
+
+/**
+ * Lists every church_* queue this gateway owns, with the live enabled/
+ * accepting state from cupsd and the account code read back out of each
+ * queue's own compiled PPD -- the same authoritative source provisionQueue
+ * verifies against (lpoptions can't report a parameterized Custom value).
+ * Powers the dashboard's "Gateway" page so the office can see, at a glance,
+ * which queues exist and what code each carries, without shelling into the
+ * container.
+ */
+async function listQueues(): Promise<QueueSummary[]> {
+	// `lpstat -l -p` prints, per printer: a "printer <name> is idle/…" line
+	// (with "enabled"/"disabled") plus indented detail lines. `-v` gives the
+	// device-uri. We only care about our own church_* queues.
+	const { stdout: pStdout } = await execFileAsync('lpstat', ['-l', '-p']).catch(() => ({
+		stdout: ''
+	}));
+	const { stdout: vStdout } = await execFileAsync('lpstat', ['-v']).catch(() => ({ stdout: '' }));
+	const { stdout: aStdout } = await execFileAsync('lpstat', ['-a']).catch(() => ({ stdout: '' }));
+
+	const uriByQueue = new Map<string, string>();
+	for (const line of vStdout.split('\n')) {
+		// "device for church_598_61: socket://192.168.1.222:9100/"
+		const m = line.match(/^device for (\S+): (.+)$/);
+		if (m) uriByQueue.set(m[1], m[2]);
+	}
+	const acceptingQueues = new Set<string>();
+	for (const line of aStdout.split('\n')) {
+		// "church_598_61 accepting requests since …"
+		const m = line.match(/^(\S+) accepting requests/);
+		if (m) acceptingQueues.add(m[1]);
+	}
+
+	const summaries: QueueSummary[] = [];
+	// Split the -l -p output on each "printer <name>" header.
+	const blocks = pStdout.split(/\n(?=printer )/);
+	for (const block of blocks) {
+		const header = block.match(/^printer (\S+) is (\S+)/);
+		if (!header) continue;
+		const queueName = header[1];
+		if (!queueName.startsWith('church_')) continue;
+		const enabled = !/is disabled/.test(block) && !/disabled since/.test(block);
+		const descMatch = block.match(/Description:\s*(.+)/);
+		const ppdContent = await readFile(`/etc/cups/ppd/${queueName}.ppd`, 'utf-8').catch(() => '');
+		const codeMatch = ppdContent.match(/\*DefaultJCLUserNumber:\s*Custom\.(\S+)/);
+		summaries.push({
+			queueName,
+			description: descMatch ? descMatch[1].trim() : '',
+			deviceUri: uriByQueue.get(queueName) ?? '',
+			accepting: acceptingQueues.has(queueName),
+			enabled,
+			jclUserNumber: codeMatch ? codeMatch[1] : null
+		});
+	}
+	return summaries;
+}
+
+interface ActiveJob {
+	queueName: string;
+	jobId: string;
+	user: string;
+	sizeBytes: number | null;
+	submittedAt: string;
+}
+
+/**
+ * The live print queue: jobs currently pending/printing on the gateway
+ * (i.e. accepted from a Mac but not yet finished at the copier). This is
+ * the "queue of jobs sent to the gateway" the dashboard shows -- distinct
+ * from readPageLog(), which is the history of already-printed pages.
+ */
+async function listActiveJobs(): Promise<ActiveJob[]> {
+	// `lpstat -o` lists queued jobs: "church_598_61-42  will  10240  Tue 26 Aug …"
+	const { stdout } = await execFileAsync('lpstat', ['-o']).catch(() => ({ stdout: '' }));
+	const jobs: ActiveJob[] = [];
+	for (const line of stdout.split('\n')) {
+		if (!line.trim()) continue;
+		// job-id is "<queue>-<num>"; split the queue name back off the front.
+		const m = line.match(/^(\S+?)-(\d+)\s+(\S+)\s+(\d+)\s+(.+)$/);
+		if (!m) continue;
+		const [, queueName, num, user, size, submitted] = m;
+		jobs.push({
+			queueName,
+			jobId: `${queueName}-${num}`,
+			user,
+			sizeBytes: Number(size) || null,
+			submittedAt: submitted.trim()
+		});
+	}
+	return jobs;
+}
+
+const ERROR_LOG_PATH = process.env.ERROR_LOG_PATH ?? '/var/log/cups/error_log';
+
+/**
+ * Tails the tail of cupsd's error_log so the dashboard can show recent
+ * gateway activity/problems without anyone shelling into the container.
+ * Bounded to the last `lines` entries so this never returns a huge payload.
+ */
+async function readRecentLog(lines: number): Promise<string[]> {
+	let raw: string;
+	try {
+		raw = await readFile(ERROR_LOG_PATH, 'utf-8');
+	} catch {
+		return [];
+	}
+	return raw
+		.split('\n')
+		.filter((l) => l.trim())
+		.slice(-lines);
+}
+
 interface PageLogEntry {
 	queueName: string;
 	jobId: string;
@@ -197,11 +333,11 @@ interface PageLogEntry {
  * this is data our own gateway wrote, in a documented format, not a
  * page a firmware update could silently reformat.
  *
- * NOTE: not yet validated against a real completed job on real
- * hardware -- see gateway/README.md. In particular, whether this alone
- * is enough for accurate B&W-vs-color billing, or whether that still
- * needs cross-checking against the printer's own accounting, is an
- * open question until tested for real.
+ * This feeds the dashboard's operational Gateway page (job history/
+ * "what's going on"), NOT billing -- with the copier's auth left on,
+ * billing comes from the copier's own Job Log, which has authoritative
+ * color counts (see docs/GATEWAY_MIGRATION.md). So page_log's known
+ * weakness at B&W-vs-color detail doesn't matter here.
  */
 async function readPageLog(sinceIso: string | null): Promise<PageLogEntry[]> {
 	let raw: string;
@@ -294,6 +430,31 @@ const server = createServer(async (req, res) => {
 			const entries = await readPageLog(since);
 			res.writeHead(200, { 'content-type': 'application/json' });
 			res.end(JSON.stringify(entries));
+			return;
+		}
+
+		// Provisioned queues + their live state and baked-in account codes.
+		if (req.method === 'GET' && url.pathname === '/queues') {
+			const queues = await listQueues();
+			res.writeHead(200, { 'content-type': 'application/json' });
+			res.end(JSON.stringify(queues));
+			return;
+		}
+
+		// The live queue: jobs accepted but not yet finished at the copier.
+		if (req.method === 'GET' && url.pathname === '/active-jobs') {
+			const jobs = await listActiveJobs();
+			res.writeHead(200, { 'content-type': 'application/json' });
+			res.end(JSON.stringify(jobs));
+			return;
+		}
+
+		// Recent cupsd error_log lines, for the dashboard's "what's going on".
+		if (req.method === 'GET' && url.pathname === '/logs') {
+			const lines = Math.min(Number(url.searchParams.get('lines')) || 200, 1000);
+			const log = await readRecentLog(lines);
+			res.writeHead(200, { 'content-type': 'application/json' });
+			res.end(JSON.stringify({ lines: log }));
 			return;
 		}
 

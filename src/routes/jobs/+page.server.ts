@@ -16,6 +16,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			id: printJob.id,
 			printerJobId: printJob.printerJobId,
 			jobMode: printJob.jobMode,
+			source: printJob.source,
 			loginName: printJob.loginName,
 			userName: printJob.userName,
 			startedAt: printJob.startedAt,

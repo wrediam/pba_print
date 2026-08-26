@@ -15,6 +15,10 @@ services:
       SYNC_INTERVAL_SECONDS: 30
       GATEWAY_URL: http://gateway:8631
       GATEWAY_SHARED_SECRET: change-me-gateway-secret
+      # LAN address of the gateway's 631 port as client Macs reach it --
+      # the host publishing "631:631" below (this same host). Used to build
+      # the print URI the macOS installer points each Mac at.
+      GATEWAY_PUBLIC_HOST: 192.168.8.235:631
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/ || exit 1']
       interval: 10s

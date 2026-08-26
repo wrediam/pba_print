@@ -60,7 +60,41 @@ account code as a **per-macOS-user CUPS default**, which was fragile
 enough in practice (silently failing on some Macs) to be worth
 redesigning around. The gateway is a small always-on CUPS instance this
 app controls (`gateway/`, a new `gateway` service in `compose.yaml`)
-that sits between client Macs and the physical copier:
+that sits between client Macs and the physical copier.
+
+**The copier's own per-user-code authentication stays ON.** An earlier
+draft of this migration planned to switch it off and make the gateway
+the sole trusted source of jobs -- that plan is abandoned. Auth stays on
+so that **walk-up codes keep working**: people who stand at the machine
+and enter a code to copy/scan still authenticate the same way they
+always have. Because auth is on, network print jobs must also carry a
+valid code -- which the gateway does automatically (`JCLUserNumber`, the
+account code baked into each queue). So both paths -- walk-up and
+gateway -- authenticate at the copier, and both end up in the copier's
+own Job Log tagged with their code. That has two consequences worth
+holding onto:
+
+- **All printer options must remain available to gateway users and pass
+  through to the copier.** The gateway queue bakes in *defaults* (the
+  installed hardware config, and the account code) but does not force
+  per-job choices: color, duplex, staple, punch, tray, and paper size
+  selected in a staff Mac's print dialog flow through the gateway to the
+  copier. The one setting that previously broke this was `ARCMode`,
+  which was pinned to `CMBW` (forcing every job to mono); it now
+  defaults to `CMAuto` (the PPD's own default) so a job prints color
+  only when the user explicitly picks it. See `gateway/control-api.ts`.
+- **Billing has a single source of truth: the copier's own Job Log**
+  (the "Printer integration" section below), unchanged. With auth on,
+  every job -- walk-up *and* gateway -- is already in that log with its
+  code and the copier's authoritative B&W-vs-color counts, so there's no
+  need (and no benefit) to also bill from the gateway's own logs, and no
+  risk of counting a gateway job twice. Each imported job is *labelled*
+  `walkup` vs `network` (see `print_job.source`, set from the Job Mode in
+  `src/lib/server/printer/sync.ts`) purely so the office can see the
+  split; the gateway's own job data (`/jobs`, `/active-jobs`, `/logs`)
+  drives the operational **Gateway** dashboard page, not billing.
+
+The queue mechanics themselves:
 
 - One real CUPS queue per person+department combo lives on the gateway,
   not on individual staff Macs. The account code is the queue's own
@@ -84,13 +118,24 @@ that sits between client Macs and the physical copier:
   to re-run the installer.
 - `GATEWAY_URL` is optional -- if unset, gateway provisioning is simply
   unavailable (`503` from the API) and everything else keeps working
-  unaffected, including the old Sharp-Job-Log-based sync below.
+  unaffected, including the Sharp-Job-Log-based sync below.
+- The **Gateway** dashboard page (`src/routes/gateway/`) shows the office
+  what the gateway is doing without anyone shelling into the container:
+  liveness, the provisioned queues (from `gateway_queue`, cross-checked
+  against the gateway's live enabled/accepting state and the account code
+  read back out of each queue's compiled PPD), the **live queue** of jobs
+  accepted-but-not-yet-printed, and the tail of the gateway's CUPS log.
+  These read three read-only control-API endpoints -- `GET /queues`,
+  `GET /active-jobs`, `GET /logs` -- alongside the existing `GET /jobs`
+  (see `gateway/control-api.ts` and `src/lib/server/gateway/client.ts`).
 
-**Not yet done:** switching the actual usage-ingestion path (the
-"Printer integration" section below) from scraping the Sharp's own Job
-Log over to reading the gateway's own CUPS job history instead -- see
-`docs/GATEWAY_MIGRATION.md` for why that's a real but separate piece of
-work, not yet started.
+**Deliberately *not* doing:** switching the usage-ingestion path (the
+"Printer integration" section below) over to the gateway's own CUPS job
+history. That was on the table only under the abandoned auth-off plan
+(where the copier's Job Log would no longer attribute network jobs). With
+auth staying on, the copier's Job Log remains complete and authoritative,
+so it stays the single billing source and the gateway's job history is
+used only for the operational Gateway page -- see `docs/GATEWAY_MIGRATION.md`.
 
 ## Printer integration (`src/lib/server/printer/`)
 
@@ -157,17 +202,29 @@ requirement; if the password is lost, reset it directly in the database.
 ## macOS app download (`src/routes/download-app/`)
 
 Serves `static/app-template/template.zip` (a pre-built copy of
-`Fix Church Printer.app`) with its bundled `department_codes.txt`
-replaced on the fly from the live `department` table, so downloads
-always reflect current codes without needing a Mac to rebuild the app.
+`Fix Church Printer.app`) **as-is** -- no on-the-fly repacking. An
+earlier version injected a fresh `department_codes.txt` on every
+download, but modifying a signed bundle's contents made macOS report it
+"damaged"; instead the app now fetches department codes at runtime from
+`GET /api/departments`, so the static zip never needs touching to stay
+current (see `src/routes/download-app/file/+server.ts`).
 
-This repacking happens in Node on Linux, which invalidates the app's ad-
-hoc code signature -- not a regression, since ad-hoc signing was never
-enough to satisfy Gatekeeper anyway (users already need to right-click →
-Open the first time regardless, and that instruction is on the download
-page).
+The app is ad-hoc signed, which never satisfied Gatekeeper anyway --
+users right-click → Open the first time regardless, and that instruction
+is on the download page.
 
-If the macOS app's own logic ever changes (new driver, new hardware
-options, etc.), `static/app-template/template.zip` needs to be rebuilt
-on an actual Mac from the `FixChurchPrinter` project and re-copied in --
-this dashboard only ever touches the one text file inside it.
+The bundle now follows the **gateway model** (see
+`docs/GATEWAY_MIGRATION.md`): its `add_profile_queue.sh` asks the
+dashboard's `/api/gateway/provision` for a queue and points a local
+queue at the returned gateway URI using the bundled Linux PostScript PPD
+(`Sharp-BP-71C65-ps.ppd`) -- the old macOS Sharp driver + `pstomx3061ps`
+filter are gone from it. If the app's logic changes again, rebuild it
+from the `FixChurchPrinter` project (on the Desktop) -- recompile the
+AppleScript if that changed, re-zip `Fix Church Printer.app`, and copy
+the zip over `static/app-template/template.zip`. The `2026-08-26` rebuild
+that introduced the gateway model rewrote `add_profile_queue.sh` and
+`remove_church_queues.sh`, bundled the Linux PPD, and added
+`verify_person.sh` -- and, because the AppleScript wrapper gained a
+personal-code verification step, recompiled `Scripts/main.scpt` via
+`osacompile` (the loose source is `Fix Church Printer.applescript` in the
+Desktop project).

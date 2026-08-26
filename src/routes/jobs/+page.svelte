@@ -28,6 +28,7 @@
 		{ key: 'startedAt', label: 'Date' },
 		{ key: 'completedAt', label: 'Completed' },
 		{ key: 'jobMode', label: 'Job Mode' },
+		{ key: 'source', label: 'Source' },
 		{ key: 'userName', label: 'User' },
 		{ key: 'loginName', label: 'Code Sent' },
 		{ key: 'person', label: 'Person' },
@@ -63,6 +64,7 @@
 
 	const DEFAULT_COLUMNS: ColumnKey[] = [
 		'startedAt',
+		'source',
 		'userName',
 		'loginName',
 		'person',
@@ -223,6 +225,7 @@
 							{#if isVisible('startedAt')}<Table.Head>Date</Table.Head>{/if}
 							{#if isVisible('completedAt')}<Table.Head>Completed</Table.Head>{/if}
 							{#if isVisible('jobMode')}<Table.Head>Job Mode</Table.Head>{/if}
+							{#if isVisible('source')}<Table.Head>Source</Table.Head>{/if}
 							{#if isVisible('userName')}<Table.Head>User</Table.Head>{/if}
 							{#if isVisible('loginName')}<Table.Head>Code Sent</Table.Head>{/if}
 							{#if isVisible('person')}<Table.Head>Person</Table.Head>{/if}
@@ -282,6 +285,17 @@
 								{/if}
 								{#if isVisible('jobMode')}
 									<Table.Cell>{row.jobMode}</Table.Cell>
+								{/if}
+								{#if isVisible('source')}
+									<Table.Cell>
+										{#if row.source === 'network'}
+											<Badge variant="secondary">Gateway</Badge>
+										{:else if row.source === 'walkup'}
+											<Badge variant="outline">Walk-up</Badge>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</Table.Cell>
 								{/if}
 								{#if isVisible('userName')}
 									<Table.Cell>{row.userName}</Table.Cell>

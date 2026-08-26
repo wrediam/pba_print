@@ -148,6 +148,24 @@ function isMatchableCode(loginName: string): boolean {
 	return !SYSTEM_LOGIN_NAMES.has(loginName);
 }
 
+/**
+ * Classifies a Job Log row by how it reached the copier, from its Job
+ * Mode. "Print" is a network print job -- after the gateway migration
+ * (see docs/GATEWAY_MIGRATION.md) these come in through the print
+ * gateway, which stamps the account code. Everything else (Copy, Scan,
+ * Fax, Document Filing, ...) is someone physically at the machine, gated
+ * by the copier's own walk-up user-code auth.
+ *
+ * This drives the "walk-up vs gateway" split the office wants to see --
+ * but note both kinds are still billed from this one Job Log, since with
+ * the copier's auth left ON every job here already carries its code.
+ * "source" is a visibility label, not a second billing path, which is
+ * what keeps gateway jobs from being counted twice.
+ */
+function classifySource(jobMode: string): 'walkup' | 'network' {
+	return jobMode.trim().toLowerCase() === 'print' ? 'network' : 'walkup';
+}
+
 export interface SyncResult {
 	jobsFound: number;
 	jobsNew: number;
@@ -238,6 +256,7 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 			await db.insert(printJob).values({
 				printerJobId: row.printerJobId,
 				jobMode: row.jobMode,
+				source: classifySource(row.jobMode),
 				loginName: row.loginName,
 				personId,
 				departmentId,

@@ -122,6 +122,17 @@ export const printJob = pgTable(
 		id: serial('id').primaryKey(),
 		printerJobId: integer('printer_job_id').notNull(),
 		jobMode: text('job_mode').notNull(), // "Print" | "Copy" | "USB Memory Scan" | ...
+		// How the job reached the copier, derived from jobMode at ingest:
+		//   "walkup"  -- someone stood at the machine (Copy/Scan/Fax/etc.);
+		//                the copier's own per-user auth is what gates these.
+		//   "network" -- a network print job (jobMode "Print"). Post-migration
+		//                these come in through the print gateway, which stamps
+		//                the account code; a stray direct-to-printer job would
+		//                also land here. Both are still billed from this same
+		//                Job Log -- "source" is for visibility, not a second
+		//                billing path (see docs/GATEWAY_MIGRATION.md).
+		// Null on rows imported before this column existed.
+		source: text('source'), // "walkup" | "network" | null
 		loginName: text('login_name'), // the raw account/login code off the printer, or null if "N/A"
 		personId: integer('person_id').references(() => person.id),
 		departmentId: integer('department_id').references(() => department.id),

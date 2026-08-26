@@ -25,9 +25,18 @@ gateway container (this directory)
    and the copier's hardware config (trays/finisher/punch) -- all
    provisioned by control-api.ts, not by hand
    ▼  socket://<PRINTER_HOST>:9100 (raw PostScript+JCL, direct)
-Sharp BP-71C65 (its own per-user auth should be OFF -- this gateway is
-the sole trusted source of jobs)
+Sharp BP-71C65 (its own per-user auth stays ON -- walk-up codes still
+work; gateway jobs authenticate via the JCLUserNumber code they carry)
 ```
+
+The copier's own per-user-code authentication stays **on** (an earlier
+draft planned to switch it off -- reversed, so walk-up codes keep
+working). Gateway jobs authenticate automatically via the account code
+each queue stamps, exactly like a walk-up user's typed code. Billing
+therefore stays on the copier's own Job Log (the single source that has
+every job with authoritative color counts); this gateway's own job data
+drives the dashboard's operational **Gateway** page, not the invoice.
+See `docs/GATEWAY_MIGRATION.md`.
 
 ## What's in here
 
@@ -65,6 +74,9 @@ needs doing on-site:
    `lpadmin -o` in this container (expected to be far more reliable than
    the old per-user `lpoptions` approach, since there's no "which human's
    home directory" ambiguity here -- but "expected" isn't "confirmed").
-3. Whatever setting on the Sharp itself disables per-user-code
-   enforcement for jobs coming from this gateway's IP -- copier-side,
-   not something this repo can do for you.
+3. That the copier **accepts** a gateway job carrying its `JCLUserNumber`
+   code under per-user-code auth (auth stays on -- see above), the same
+   way it accepts a walk-up user's typed code. And, for any department
+   you want color on, that its color authority is granted copier-side so
+   an `ARCMode=CMAuto` queue doesn't hit Sharp error 0435 -- copier-side
+   config, not something this repo can do for you.

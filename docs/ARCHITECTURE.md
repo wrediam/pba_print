@@ -199,10 +199,28 @@ resolution, can use it). No self-serve signup, no password reset flow --
 this is intentional per the "just one login for the secretary"
 requirement; if the password is lost, reset it directly in the database.
 
-## macOS app download (`src/routes/download-app/`)
+## Installer download (`src/routes/download-app/`)
 
-Serves `static/app-template/template.zip` (a pre-built copy of
-`Fix Church Printer.app`) **as-is** -- no on-the-fly repacking. An
+Offers both installers and **auto-detects the visitor's OS** (client-side
+in `+page.svelte`, from `navigator.userAgentData?.platform` /
+`navigator.platform` / userAgent) to lead with the right one -- with the
+other still one click away, and both shown if detection is inconclusive
+or JS is off.
+
+- **macOS**: `/download-app/file` serves `static/app-template/template.zip`
+  (`Fix Church Printer.app`).
+- **Windows**: `/download-app/windows` serves
+  `static/app-template/church-printer-windows.zip` -- a plain
+  `Install Church Printer.bat` + `Install-ChurchPrinter.ps1` (+ README).
+  The `.bat` self-elevates and runs the PowerShell script, which mirrors
+  the Mac flow (verify personal code → pick departments → provision each
+  gateway queue → add a driverless "Microsoft IPP Class Driver" printer
+  pointed at the returned URI). Source in `windows-installer/`; the zip is
+  rebuilt from there. Same finishing-options caveat as the Mac
+  `-m everywhere` fallback -- if staple/punch/tray don't surface richly
+  via driverless IPP, install the Sharp Windows PS driver instead.
+
+The macOS zip is served **as-is** -- no on-the-fly repacking. An
 earlier version injected a fresh `department_codes.txt` on every
 download, but modifying a signed bundle's contents made macOS report it
 "damaged"; instead the app now fetches department codes at runtime from

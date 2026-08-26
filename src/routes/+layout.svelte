@@ -14,7 +14,7 @@
 		{ href: '/people', label: 'People' },
 		{ href: '/rates', label: 'Rates' },
 		{ href: '/gateway', label: 'Gateway' },
-		{ href: '/download-app', label: 'Mac App' }
+		{ href: '/download-app', label: 'Setup App' }
 	];
 </script>
 

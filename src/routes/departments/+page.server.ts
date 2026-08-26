@@ -3,6 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { department } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { reprovisionForDepartmentCodeChange } from '$lib/server/gateway/provisioning';
 
 export const load: PageServerLoad = async () => {
 	const departments = await db.select().from(department).orderBy(department.code);
@@ -30,10 +31,20 @@ export const actions: Actions = {
 		const label = String(data.get('label') ?? '').trim();
 		if (!id || !code || !label) return fail(400, { error: 'Code and label are both required.' });
 
+		const [before] = await db.select({ code: department.code }).from(department).where(eq(department.id, id));
+
 		await db
 			.update(department)
 			.set({ code, label, updatedAt: new Date() })
 			.where(eq(department.id, id));
+
+		// The gateway's queue names are derived from the department code,
+		// so a code change orphans any already-provisioned queues under
+		// the old name -- re-provision them under the new one. No-ops if
+		// the gateway isn't configured for this deployment yet.
+		if (before && before.code !== code) {
+			await reprovisionForDepartmentCodeChange(id, before.code);
+		}
 	},
 
 	toggleActive: async ({ request }) => {

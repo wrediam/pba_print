@@ -75,6 +75,36 @@ export const rate = pgTable('rate', {
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 });
 
+// ── Print gateway ────────────────────────────────────────────────────
+// One row per person+department queue provisioned on the print gateway
+// (see gateway/ -- a CUPS instance this app controls that sits between
+// client Macs and the physical copier). Replaces the old model of
+// embedding the account code as a fragile per-macOS-user CUPS default
+// on each client machine: instead, the code is baked into a queue that
+// lives entirely on the gateway (set once, by us, never touched again),
+// and each client's local queue is just a static pointer at
+// `ipp://<gateway>/printers/<queueName>` -- see docs/GATEWAY_MIGRATION.md.
+export const gatewayQueue = pgTable(
+	'gateway_queue',
+	{
+		id: serial('id').primaryKey(),
+		personId: integer('person_id')
+			.notNull()
+			.references(() => person.id, { onDelete: 'cascade' }),
+		departmentId: integer('department_id')
+			.notNull()
+			.references(() => department.id, { onDelete: 'cascade' }),
+		queueName: text('queue_name').notNull(), // e.g. "church_598_61", matches the CUPS queue name on the gateway
+		fullCode: text('full_code').notNull(), // personalCode + department.code, embedded on the gateway as JCLUserNumber
+		status: text('status').notNull().default('pending'), // "pending" | "ready" | "error"
+		lastError: text('last_error'),
+		lastProvisionedAt: timestamp('last_provisioned_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [uniqueIndex('gateway_queue_person_dept_idx').on(t.personId, t.departmentId)]
+);
+
 // ── Usage ingested from the printer ─────────────────────────────────
 // One row per job pulled from the printer's own Job Log (see
 // src/lib/server/printer/). printerJobId is the printer's own log

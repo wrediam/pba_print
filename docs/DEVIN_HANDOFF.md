@@ -35,6 +35,60 @@ and assumed to work.
   skips, department seed inserts 0 new). All of that actually happened
   during this build, not just "should work."
 
+## Print gateway migration (in progress, see `docs/GATEWAY_MIGRATION.md`)
+
+The old account-code mechanism (a per-macOS-user CUPS default, set by
+the `FixChurchPrinter` installer) turned out to be fragile enough in
+real use (silently failing on some Macs, and with the copier's own
+user-code auth on, causing outright failed print jobs) to be worth
+replacing. Built and verified so far, this session:
+
+- **`gateway/`** -- a new CUPS-based print gateway service, using
+  Sharp's real Linux PostScript driver (not the macOS one bundled in
+  `static/app-template/template.zip`, which depends on a macOS-only
+  binary filter and can't run in a container). **Built and exercised
+  end-to-end locally** with `docker build`/`docker run`: queue
+  provisioning, PPD hardware options, and the `JCLUserNumber` account
+  code all confirmed landing correctly in the compiled PPD
+  (`*DefaultJCLUserNumber: Custom.59861`), verification logic, queue
+  deletion, and the `/jobs` endpoint all actually run, not just written
+  and assumed to work. **Not yet tested against the real copier** --
+  nothing here has been proven to actually print to real hardware yet.
+- **`gateway_queue` table + `src/lib/server/gateway/`** -- tracks
+  provisioned queues, `POST /api/gateway/provision` (what the future
+  installer will call), and automatic re-provisioning when a
+  person's/department's code changes. `npm run check` and `npm run
+  build` both pass with these changes.
+- **`compose.yaml`** -- new `gateway` service, wired to the app via
+  `GATEWAY_URL`/`GATEWAY_SHARED_SECRET` (optional -- app works fine
+  without them set, gateway provisioning just returns 503).
+
+**Not done yet, and real work, not just polish:**
+
+1. **The macOS installer app itself hasn't been touched** -- I don't
+   have its AppleScript source, only the built `.app`. `docs/GATEWAY_MIGRATION.md`
+   has exact, script-by-script instructions for what to change in
+   `add_profile_queue.sh` (the account-code embedding moves off of it
+   entirely) and why. This needs doing on the separate Mac project,
+   then rebuilding and replacing `template.zip` in this repo.
+2. **Nothing has been tested against the real Sharp BP-71C65.** The
+   gateway container's mechanics are solid (verified locally), but
+   whether `socket://<printer>:9100/` actually accepts jobs from it,
+   whether `JCLUserNumber` really lands on a real printed page, and
+   whether IPP-Everywhere finishing options (staple/punch) come through
+   richly enough on the Mac side, are all open questions -- see the
+   "Not yet verified against real hardware" section of `gateway/README.md`.
+3. **The copier's own per-user-code authentication needs disabling**
+   copier-side (the whole point of this migration is that the gateway
+   becomes the sole authority) -- not something this repo can do, and
+   not done yet.
+4. **Usage/billing ingestion still comes from the old Sharp Job Log
+   scrape, unchanged.** The gateway exposes a `/jobs` endpoint reading
+   CUPS's own `page_log`, but wiring that into `print_job`/billing
+   reports, and figuring out whether it gives good enough B&W-vs-color
+   detail, is real follow-up work requiring a real printed job to test
+   against -- not started.
+
 ## Not done yet / needs your attention
 
 1. ~~Verify the Job Log column mapping before trusting a real bill.~~

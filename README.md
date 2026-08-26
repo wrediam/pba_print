@@ -67,3 +67,7 @@ and a simulated redeploy against existing data, during development. See
   generic Docker instructions, full env var reference.
 - **[docs/DEVIN_HANDOFF.md](docs/DEVIN_HANDOFF.md)** -- what's built,
   what's verified, and what's left to do next.
+- **[docs/GATEWAY_MIGRATION.md](docs/GATEWAY_MIGRATION.md)** -- the
+  print gateway (`gateway/`): why it exists, what's already built here,
+  and exact instructions for the macOS installer-app changes it still
+  needs.

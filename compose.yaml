@@ -13,6 +13,8 @@ services:
       ADMIN_USERNAME: parkside
       ADMIN_PASSWORD: adobe
       SYNC_INTERVAL_SECONDS: 30
+      GATEWAY_URL: http://gateway:8631
+      GATEWAY_SHARED_SECRET: change-me-gateway-secret
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/ || exit 1']
       interval: 10s
@@ -22,6 +24,27 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # Print gateway -- see gateway/README.md and docs/GATEWAY_MIGRATION.md.
+  # Sits between client Macs and the physical copier: one real CUPS
+  # queue per person+department combo, account code baked in server-side
+  # instead of relying on a per-macOS-user CUPS default.
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    ports:
+      - '631:631' # IPP, so client Macs can print through it
+    environment:
+      GATEWAY_SHARED_SECRET: change-me-gateway-secret # must match the app's value above
+      PRINTER_HOST: 192.168.1.222
+    volumes:
+      - gateway_cups:/etc/cups/ppd
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8631/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   db:
     image: postgres:16-alpine
@@ -40,3 +63,4 @@ services:
 
 volumes:
   pgdata:
+  gateway_cups:

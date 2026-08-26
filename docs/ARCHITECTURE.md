@@ -51,6 +51,47 @@ convention to keep in mind when adding people.
 - `sync_run` -- history of each sync attempt, surfaced on the dashboard
   as "last synced X ago" / error status.
 
+## Print gateway (`gateway/`, `src/lib/server/gateway/`)
+
+New, being migrated to -- see `docs/GATEWAY_MIGRATION.md` for the full
+story and exact instructions for updating the macOS installer. Short
+version: the old model (see "Printer integration" below) embedded the
+account code as a **per-macOS-user CUPS default**, which was fragile
+enough in practice (silently failing on some Macs) to be worth
+redesigning around. The gateway is a small always-on CUPS instance this
+app controls (`gateway/`, a new `gateway` service in `compose.yaml`)
+that sits between client Macs and the physical copier:
+
+- One real CUPS queue per person+department combo lives on the gateway,
+  not on individual staff Macs. The account code is the queue's own
+  compiled-in PPD default (`JCLUserNumber`), set once by the gateway's
+  own control API (`gateway/control-api.ts`) -- never touched by a
+  human, never dependent on which macOS user happens to be logged in.
+- Client Macs get a much simpler local queue: just a static pointer at
+  `ipp://<gateway>:631/printers/church_<personcode>_<deptcode>`, set
+  once by the installer and never touched again.
+- `gateway_queue` (`src/lib/server/db/schema.ts`) tracks which queues
+  have been provisioned, for which person+department combo, and their
+  last known status -- populated by `ensureQueue()`
+  (`src/lib/server/gateway/provisioning.ts`), which the installer
+  triggers via `POST /api/gateway/provision`.
+- Changing a person's or department's code re-provisions any
+  already-provisioned gateway queues automatically (see the `update`
+  actions in `src/routes/departments/+page.server.ts` and
+  `src/routes/people/+page.server.ts`) -- the gateway's queue names are
+  derived from those codes, so a code change would otherwise orphan the
+  old queue and leave the new code unprovisioned until someone happened
+  to re-run the installer.
+- `GATEWAY_URL` is optional -- if unset, gateway provisioning is simply
+  unavailable (`503` from the API) and everything else keeps working
+  unaffected, including the old Sharp-Job-Log-based sync below.
+
+**Not yet done:** switching the actual usage-ingestion path (the
+"Printer integration" section below) from scraping the Sharp's own Job
+Log over to reading the gateway's own CUPS job history instead -- see
+`docs/GATEWAY_MIGRATION.md` for why that's a real but separate piece of
+work, not yet started.
+
 ## Printer integration (`src/lib/server/printer/`)
 
 There is no real API here. Looked at three alternatives before settling

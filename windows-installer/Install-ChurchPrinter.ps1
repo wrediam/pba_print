@@ -128,12 +128,15 @@ foreach ($d in $selected) {
 	$name = "Church_${deptCode}_$safe"
 
 	try {
-		if (-not (Get-PrinterPort -Name $portUrl -ErrorAction SilentlyContinue)) {
-			Add-PrinterPort -Name $portUrl -ErrorAction Stop
-		}
 		if (Get-Printer -Name $name -ErrorAction SilentlyContinue) {
 			Remove-Printer -Name $name -ErrorAction SilentlyContinue
 		}
+		# Deliberately NOT calling Add-PrinterPort first -- the "port type"
+		# for a plain IPP URL isn't actually implemented in that cmdlet (it
+		# only knows about local/TCP/LPR ports), so it always failed here
+		# with a generic "operation failed" error no matter what the URL
+		# was. Add-Printer itself creates the right port when handed a URL
+		# PortName directly -- that's the documented, supported way.
 		Add-Printer -Name $name -DriverName $driver -PortName $portUrl -ErrorAction Stop
 		$results += "OK      $($d.label)  ->  $name"
 	} catch {

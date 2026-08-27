@@ -15,6 +15,20 @@ services:
       SYNC_INTERVAL_SECONDS: 30
       GATEWAY_URL: http://gateway:8631
       GATEWAY_SHARED_SECRET: change-me-gateway-secret
+      # Read by src/lib/server/gateway/client.ts, which overrides
+      # whatever URI the gateway's own control API returns with this --
+      # a staff Mac/PC can't resolve "gateway" (that's a Docker-internal
+      # name only this app's own network sees). NOTE THE FORMAT
+      # DIFFERENCE from the gateway service's own GATEWAY_PUBLIC_HOST
+      # below: client.ts wants host:port together, control-api.ts wants
+      # a bare host and appends :631 itself. Same variable name, two
+      # different expected shapes -- worth double-checking both are set
+      # and correctly formatted any time this is touched again (missing
+      # this on the app side specifically was what caused the installer
+      # to get back "ipp://gateway:631/..." instead of a real LAN
+      # address, since client.ts's fallback derives from GATEWAY_URL's
+      # Docker-internal hostname when this is unset).
+      GATEWAY_PUBLIC_HOST: 192.168.8.235:631
     healthcheck:
       # node (always present in these images) instead of wget/curl, which
       # aren't installed in the slim base -- that's why the containers
@@ -46,11 +60,14 @@ services:
     environment:
       GATEWAY_SHARED_SECRET: change-me-gateway-secret # must match the app's value above
       PRINTER_HOST: 192.168.1.222
-      # LAN address client Macs/PCs can reach THIS gateway container at --
-      # must NOT be "localhost"/"gateway" (those only resolve correctly
-      # from inside the app's own Docker network, not from a client
-      # machine on the LAN). This is the host publishing "631:631" below
-      # -- bare host/IP only, no port (the code appends :631 itself).
+      # Read by gateway/control-api.ts itself -- bare host/IP, NO port
+      # (control-api.ts appends :631 itself). Contrast with the app
+      # service's GATEWAY_PUBLIC_HOST above, which DOES include the port
+      # -- see the comment there. In practice the app's client.ts always
+      # overrides whatever URI this container returns before it reaches
+      # an installer, so this mostly matters for anyone/anything hitting
+      # this container's API directly, and for its own required-at-
+      # startup check -- but keep it correct anyway.
       GATEWAY_PUBLIC_HOST: 192.168.8.235
     volumes:
       # Persist the WHOLE /etc/cups, not just ppd/ -- the queue definitions

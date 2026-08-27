@@ -113,7 +113,9 @@
 					{#each data.provisioned as q (q.queueName)}
 						{@const live = data.liveQueues.find((l) => l.queueName === q.queueName)}
 						<Table.Row>
-							<Table.Cell class="font-mono text-xs">{q.queueName}</Table.Cell>
+							<Table.Cell class="font-mono text-xs">
+								<a class="underline hover:text-primary" href="/gateway/{q.queueName}">{q.queueName}</a>
+							</Table.Cell>
 							<Table.Cell>
 								{q.personName ?? '—'}
 								{#if q.personalCode}<span class="font-mono text-muted-foreground"

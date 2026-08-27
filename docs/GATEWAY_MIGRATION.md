@@ -41,20 +41,18 @@ walk-up user's typed code. So both paths coexist:
 - **Gateway** (network print from a staff Mac) -- authenticated by the
   code the gateway stamps.
 
-Both land in the copier's own Job Log, each tagged with its code. Two
-things follow, and they shape the rest of this migration:
+Walk-up jobs land in the copier's own Job Log tagged with the typed code.
+Gateway jobs were *expected* to as well -- but on real hardware they don't
+(they log as "No Authentication"). Two things follow, and they shape the
+rest of this migration:
 
-1. **Billing stays on the copier's Job Log -- one source, no double
-   counting.** With auth on, that log already contains every job (walk-up
-   *and* gateway) with its code and the copier's authoritative
-   B&W-vs-color counts. So the dashboard keeps billing from it unchanged;
-   it does **not** also bill from the gateway's own logs (that would
-   double-count gateway jobs, and the gateway's `page_log` has weaker
-   color detail anyway). Each imported job is only *labelled* `walkup`
-   vs `network` (`print_job.source`, from the Job Mode -- see
-   `src/lib/server/printer/sync.ts`) so the office can see the split. The
-   gateway's own job data feeds the operational **Gateway** dashboard
-   page, not the invoice.
+1. **Billing is split by source** (see "Billing ingestion" below for the
+   full story and why). Gateway jobs are captured from the gateway and
+   attributed by their queue; walk-up jobs are billed from the copier's
+   Job Log; the copier's "Print" rows are used only to lend their
+   B&W/color split to the gateway jobs. `print_job.source` records which
+   is which (`walkup` / `network`) and the office sees the split on the
+   Jobs page.
 2. **All copier options must stay available to gateway users and pass
    through.** A gateway queue bakes in *defaults* (installed hardware,
    account code) but must not force per-job choices: duplex, staple,
@@ -197,19 +195,49 @@ against the real copier** -- shipping a rebuilt installer that points
 every Mac at an unproven gateway would break printing for everyone at
 once.
 
-## Billing ingestion: unchanged on purpose
+## Billing ingestion: split by source
 
-Billing stays on the Sharp's own Job Log scrape (`src/lib/server/printer/`),
-and that is now a **deliberate final decision, not a stopgap.** An
-earlier draft treated "move ingestion to the gateway's `page_log`" as
-pending work. With auth staying on, that move is neither needed nor
-wanted: the copier's Job Log already contains every job -- walk-up *and*
-gateway -- with its code and the copier's authoritative B&W-vs-color
-counts, so it's the single source of truth and there's no double-count
-risk. The gateway's `page_log`/`/jobs`/`/active-jobs`/`/logs` feed the
-operational **Gateway** dashboard page, not the invoice. Sync now also
-labels each imported job `walkup` vs `network` (`print_job.source`, from
-the Job Mode) so the split is visible; see `docs/ARCHITECTURE.md`.
+Real-hardware testing settled this. We first assumed that with auth on the
+copier would log each gateway job under its account code, so a single
+Job-Log scrape could bill everything. It doesn't: a test print through the
+gateway landed in the copier's Job Log as **"No Authentication"** --
+printed fine, but unattributable. The account code the gateway stamps
+(`@PJL SET ACCOUNTNUMBER`) is not coming back through the copier's log
+reliably. So billing no longer depends on it:
+
+- **Gateway jobs** are captured from the **gateway** (its `page_log`, via
+  `GET /jobs`) and attributed by the queue they arrived on
+  (`church_<person>_<dept>` -> person + department via `gateway_queue`).
+  This can't be wrong -- the gateway assigned the queue -- so attribution
+  never depends on the copier echoing anything back.
+- **Walk-up jobs** are billed from the copier's Job Log (Job Mode ≠
+  "Print"), attributed by the code the person typed at the machine.
+- The copier's own "Print" rows are **not** billed again (that would
+  double-count the gateway jobs); they're used only to **borrow the
+  B&W/color split** onto the matching gateway job, since the gateway can't
+  see color -- only the copier counts it. Matching is by identical page
+  count, closest in time within a window (`borrowColor()` in
+  `src/lib/server/printer/sync.ts`). If no match is found yet, the job is
+  billed all-B&W and `colorFromPrinter` stays false until a later sync
+  fills it in.
+
+**Needs live validation on real hardware** (nothing here has been proven
+against a real printed job yet):
+1. That the gateway's `page_log` actually records jobs in the new
+   `PageLogFormat` (`gateway/cupsd.conf`) and `readPageLog()` aggregates
+   pages correctly -- the gateway must be **redeployed** for the format
+   change to take effect.
+2. That `borrowColor()`'s page-count + time match reliably pairs a gateway
+   job with its copier Job-Log row (clock skew between the gateway
+   container and the copier, and any page-count-definition differences,
+   are the risks). Tune `COLOR_MATCH_WINDOW_MS` if needed.
+
+Separately, it's still worth finding out **why** the code doesn't come
+back in the copier log (so the copier's own accounting is right too) --
+the decisive check is capturing what the gateway sends: point a queue at
+`file://` instead of the printer, print, and `grep ACCOUNTNUMBER` the
+output. If it's there, the copier is rejecting/ignoring it (auth config);
+if not, CUPS isn't emitting the PPD's JCL.
 
 ## Still open
 

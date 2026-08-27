@@ -83,16 +83,14 @@ holding onto:
   which was pinned to `CMBW` (forcing every job to mono); it now
   defaults to `CMAuto` (the PPD's own default) so a job prints color
   only when the user explicitly picks it. See `gateway/control-api.ts`.
-- **Billing has a single source of truth: the copier's own Job Log**
-  (the "Printer integration" section below), unchanged. With auth on,
-  every job -- walk-up *and* gateway -- is already in that log with its
-  code and the copier's authoritative B&W-vs-color counts, so there's no
-  need (and no benefit) to also bill from the gateway's own logs, and no
-  risk of counting a gateway job twice. Each imported job is *labelled*
-  `walkup` vs `network` (see `print_job.source`, set from the Job Mode in
-  `src/lib/server/printer/sync.ts`) purely so the office can see the
-  split; the gateway's own job data (`/jobs`, `/active-jobs`, `/logs`)
-  drives the operational **Gateway** dashboard page, not billing.
+- **Billing is split by source.** Gateway jobs are billed from the
+  gateway (attributed by queue), walk-up jobs from the copier's Job Log;
+  the copier's "Print" rows lend their B&W/color split to gateway jobs but
+  aren't billed again. See the "Print gateway" section's billing bullet
+  above and `src/lib/server/printer/sync.ts`. (We originally expected the
+  copier to log gateway jobs under their code so one Job-Log scrape could
+  bill everything -- real hardware proved otherwise; see
+  `docs/GATEWAY_MIGRATION.md`.)
 
 The queue mechanics themselves:
 
@@ -129,13 +127,23 @@ The queue mechanics themselves:
   `GET /active-jobs`, `GET /logs` -- alongside the existing `GET /jobs`
   (see `gateway/control-api.ts` and `src/lib/server/gateway/client.ts`).
 
-**Deliberately *not* doing:** switching the usage-ingestion path (the
-"Printer integration" section below) over to the gateway's own CUPS job
-history. That was on the table only under the abandoned auth-off plan
-(where the copier's Job Log would no longer attribute network jobs). With
-auth staying on, the copier's Job Log remains complete and authoritative,
-so it stays the single billing source and the gateway's job history is
-used only for the operational Gateway page -- see `docs/GATEWAY_MIGRATION.md`.
+**Billing is split by source** (see `syncPrinterUsage()` in
+`src/lib/server/printer/sync.ts`). It turned out on real hardware that the
+copier does *not* reliably echo the gateway's account code back into its
+own Job Log -- a gateway print showed up there as "No Authentication",
+unattributable. So we don't depend on that:
+
+- **Gateway jobs** are captured from the **gateway itself** and attributed
+  by the queue they arrived on (`church_<person>_<dept>` -> person +
+  department via `gateway_queue`), which can't be wrong because the gateway
+  assigned the queue. Page counts come from the gateway's own `page_log`.
+- **Walk-up jobs** (Copy/Scan/Fax at the machine) are billed from the
+  copier's Job Log, as before (rows whose Job Mode is *not* "Print").
+- The copier's own "Print" rows are **not** billed a second time -- they're
+  the copier's record of the very gateway jobs we already captured. They're
+  used only to **borrow the B&W/color split** onto the matching gateway job
+  (the gateway can't see color; only the copier counts it). See
+  `docs/GATEWAY_MIGRATION.md`.
 
 ## Printer integration (`src/lib/server/printer/`)
 

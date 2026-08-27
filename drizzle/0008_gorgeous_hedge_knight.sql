@@ -1,0 +1,1 @@
+ALTER TABLE "print_job" ADD COLUMN "color_from_printer" boolean DEFAULT false NOT NULL;

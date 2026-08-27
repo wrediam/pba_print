@@ -21,7 +21,7 @@ export function startScheduler() {
 		try {
 			const result = await syncPrinterUsage();
 			console.log(
-				`[scheduler] sync ok: ${result.jobsNew} new job(s) of ${result.jobsFound} found` +
+				`[scheduler] sync ok: ${result.jobsNew} new walk-up job(s), ${result.gatewayJobsNew} new gateway job(s)` +
 					(result.jobsReconciled
 						? `, ${result.jobsReconciled} previously-unmatched job(s) reconciled`
 						: '') +

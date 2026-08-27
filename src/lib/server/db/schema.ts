@@ -120,19 +120,34 @@ export const printJob = pgTable(
 	'print_job',
 	{
 		id: serial('id').primaryKey(),
-		printerJobId: integer('printer_job_id').notNull(),
+		// The printer's own Job Log entry number. Set for walk-up jobs (which
+		// we read from the printer's Job Log) and null for gateway jobs (which
+		// we capture from the gateway, not the printer). Unique among non-null
+		// values so a walk-up job is never imported twice.
+		printerJobId: integer('printer_job_id'),
+		// The gateway's own job identity ("<queueName>-<cupsJobId>"). Set for
+		// gateway-captured jobs, null for walk-up jobs. Unique among non-null
+		// values so a gateway job is never imported twice.
+		gatewayJobKey: text('gateway_job_key'),
 		jobMode: text('job_mode').notNull(), // "Print" | "Copy" | "USB Memory Scan" | ...
-		// How the job reached the copier, derived from jobMode at ingest:
-		//   "walkup"  -- someone stood at the machine (Copy/Scan/Fax/etc.);
-		//                the copier's own per-user auth is what gates these.
-		//   "network" -- a network print job (jobMode "Print"). Post-migration
-		//                these come in through the print gateway, which stamps
-		//                the account code; a stray direct-to-printer job would
-		//                also land here. Both are still billed from this same
-		//                Job Log -- "source" is for visibility, not a second
-		//                billing path (see docs/GATEWAY_MIGRATION.md).
+		// Where this row came from, and therefore how it's attributed:
+		//   "walkup"  -- someone stood at the machine (Copy/Scan/Fax/...).
+		//                Read from the printer's Job Log (jobMode != "Print"),
+		//                attributed by the code the person typed.
+		//   "network" -- a print job that came THROUGH the gateway. Captured
+		//                from the gateway itself and attributed by the queue it
+		//                arrived on (queue -> person+department), NOT by the
+		//                printer echoing the code back (which it may not do).
+		//                Its B&W/color split is borrowed from the matching
+		//                printer Job Log row -- see src/lib/server/printer/sync.ts.
 		// Null on rows imported before this column existed.
 		source: text('source'), // "walkup" | "network" | null
+		// For gateway ("network") jobs only: whether the B&W/color split was
+		// successfully borrowed from a matching printer Job Log row yet. False
+		// means it's still counted as all-B&W (the gateway can't see color on
+		// its own) pending a match on a later sync. Always false/irrelevant for
+		// walk-up jobs, whose counts come straight from the printer.
+		colorFromPrinter: boolean('color_from_printer').notNull().default(false),
 		loginName: text('login_name'), // the raw account/login code off the printer, or null if "N/A"
 		personId: integer('person_id').references(() => person.id),
 		departmentId: integer('department_id').references(() => department.id),
@@ -167,7 +182,10 @@ export const printJob = pgTable(
 		originalSize: text('original_size'), // original document size -- null if "N/A"
 		syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow()
 	},
-	(t) => [uniqueIndex('print_job_printer_job_id_idx').on(t.printerJobId)]
+	(t) => [
+		uniqueIndex('print_job_printer_job_id_idx').on(t.printerJobId),
+		uniqueIndex('print_job_gateway_job_key_idx').on(t.gatewayJobKey)
+	]
 );
 
 // ── Sync history ─────────────────────────────────────────────────────

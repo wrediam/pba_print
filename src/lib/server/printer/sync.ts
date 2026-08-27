@@ -1,8 +1,9 @@
 import { db } from '$lib/server/db';
-import { department, person, printJob, syncRun } from '$lib/server/db/schema';
+import { department, gatewayQueue, person, printJob, syncRun } from '$lib/server/db/schema';
 import { and, eq, inArray, isNull, isNotNull, max, min, or } from 'drizzle-orm';
 import { PrinterClient } from './client';
-import { fetchJobLog } from './jobLog';
+import { fetchJobLog, type PrinterJobLogRow } from './jobLog';
+import { fetchGatewayJobs, isGatewayConfigured, type GatewayJobEntry } from '$lib/server/gateway/client';
 
 /**
  * Splits a printer account code back into the person and department that
@@ -166,9 +167,160 @@ function classifySource(jobMode: string): 'walkup' | 'network' {
 	return jobMode.trim().toLowerCase() === 'print' ? 'network' : 'walkup';
 }
 
+// How far apart (ms) a gateway job's completion and a printer Job Log row's
+// completion may be and still be considered the same physical print when
+// borrowing the B&W/color split. Generous, because the gateway container's
+// clock and the copier's clock aren't necessarily in tight sync.
+const COLOR_MATCH_WINDOW_MS = 15 * 60 * 1000;
+
+function printerRowImpressions(r: PrinterJobLogRow): number {
+	return r.bwCount + r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0);
+}
+
+/**
+ * The gateway can attribute a job (which queue -> which person+department)
+ * and count its pages, but it cannot see color -- only the copier counts
+ * that. So for each gateway job we find the copier's own Job Log row for the
+ * same physical print (matched on identical page count, closest in time
+ * within a window) and borrow its authoritative B&W/color split. Returns
+ * null if no plausible match, in which case the job is billed all-B&W until
+ * a later sync finds its printer row.
+ */
+function borrowColor(
+	gw: { completedAt: Date; impressions: number },
+	printRows: PrinterJobLogRow[]
+): { bwCount: number; colorCount: number } | null {
+	const target = gw.completedAt.getTime();
+	let best: { bw: number; color: number; dist: number } | null = null;
+	for (const r of printRows) {
+		if (printerRowImpressions(r) !== gw.impressions) continue;
+		const t = (r.completedAt ?? r.startedAt).getTime();
+		const dist = Math.abs(t - target);
+		if (dist > COLOR_MATCH_WINDOW_MS) continue;
+		const color = r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0);
+		if (!best || dist < best.dist) best = { bw: r.bwCount, color, dist };
+	}
+	return best ? { bwCount: best.bw, colorCount: best.color } : null;
+}
+
+/**
+ * Imports jobs the gateway handled, attributing each by the queue it arrived
+ * on (queue -> person+department via gateway_queue) -- never by the printer
+ * echoing the account code back. Page counts come from the gateway; the
+ * B&W/color split is borrowed from this sync's printer Job Log "Print" rows
+ * (see borrowColor). Deduped by gatewayJobKey. No-op (and billing untouched)
+ * if the gateway isn't configured or is unreachable.
+ */
+async function importGatewayJobs(printColorRows: PrinterJobLogRow[]): Promise<number> {
+	if (!isGatewayConfigured()) return 0;
+
+	// Only pull jobs newer than the newest gateway job already stored, so we
+	// don't re-aggregate the whole page_log every sync.
+	const [{ latest } = { latest: null }] = await db
+		.select({ latest: max(printJob.completedAt) })
+		.from(printJob)
+		.where(eq(printJob.source, 'network'));
+	const sinceIso = latest ? new Date(latest).toISOString() : null;
+
+	let gwJobs: GatewayJobEntry[];
+	try {
+		gwJobs = await fetchGatewayJobs(sinceIso);
+	} catch {
+		return 0; // gateway unreachable this run -- leave billing untouched
+	}
+	if (gwJobs.length === 0) return 0;
+
+	const keys = gwJobs.map((j) => `${j.queueName}-${j.jobId}`);
+	const existing = await db
+		.select({ gatewayJobKey: printJob.gatewayJobKey })
+		.from(printJob)
+		.where(inArray(printJob.gatewayJobKey, keys));
+	const existingKeys = new Set(existing.map((e) => e.gatewayJobKey));
+
+	const queues = await db
+		.select({
+			queueName: gatewayQueue.queueName,
+			personId: gatewayQueue.personId,
+			departmentId: gatewayQueue.departmentId,
+			fullCode: gatewayQueue.fullCode
+		})
+		.from(gatewayQueue);
+	const queueByName = new Map(queues.map((q) => [q.queueName, q]));
+
+	let imported = 0;
+	for (const j of gwJobs) {
+		const key = `${j.queueName}-${j.jobId}`;
+		if (existingKeys.has(key) || j.impressions <= 0) continue;
+		const q = queueByName.get(j.queueName);
+		const completedAt = new Date(j.completedAt);
+		const color = borrowColor({ completedAt, impressions: j.impressions }, printColorRows);
+		const bwCount = color ? color.bwCount : j.impressions;
+		const colorCount = color ? color.colorCount : 0;
+		await db.insert(printJob).values({
+			gatewayJobKey: key,
+			jobMode: 'Print',
+			source: 'network',
+			loginName: q?.fullCode ?? null,
+			personId: q?.personId ?? null,
+			departmentId: q?.departmentId ?? null,
+			userName: j.user,
+			startedAt: completedAt,
+			completedAt,
+			bwCount,
+			colorCount,
+			totalCount: bwCount + colorCount,
+			fullColorCount: colorCount,
+			colorFromPrinter: color != null,
+			fileName: j.jobName
+		});
+		imported++;
+	}
+	return imported;
+}
+
+/**
+ * Fills in the B&W/color split on gateway jobs that were imported all-B&W
+ * because their printer Job Log row hadn't shown up yet -- matching them
+ * against this sync's freshly-fetched "Print" rows. Idempotent.
+ */
+async function reconcileGatewayColor(printColorRows: PrinterJobLogRow[]): Promise<number> {
+	if (printColorRows.length === 0) return 0;
+	const pending = await db
+		.select({
+			id: printJob.id,
+			completedAt: printJob.completedAt,
+			totalCount: printJob.totalCount
+		})
+		.from(printJob)
+		.where(and(eq(printJob.source, 'network'), eq(printJob.colorFromPrinter, false)));
+
+	let fixed = 0;
+	for (const job of pending) {
+		if (!job.completedAt) continue;
+		const color = borrowColor(
+			{ completedAt: new Date(job.completedAt), impressions: job.totalCount },
+			printColorRows
+		);
+		if (!color) continue;
+		await db
+			.update(printJob)
+			.set({
+				bwCount: color.bwCount,
+				colorCount: color.colorCount,
+				totalCount: color.bwCount + color.colorCount,
+				fullColorCount: color.colorCount,
+				colorFromPrinter: true
+			})
+			.where(eq(printJob.id, job.id));
+		fixed++;
+	}
+	return fixed;
+}
+
 export interface SyncResult {
 	jobsFound: number;
 	jobsNew: number;
+	gatewayJobsNew: number;
 	jobsReconciled: number;
 	unmatchedCodes: string[];
 }
@@ -226,12 +378,22 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 					)
 			: [];
 		const existingIds = new Set(existing.map((e) => e.printerJobId));
+		// The printer's Job Log holds both walk-up jobs (Copy/Scan/Fax at the
+		// machine) and network "Print" jobs. We bill WALK-UP jobs from here;
+		// the network "Print" rows are the copier's record of the gateway's
+		// own jobs -- we don't bill those from here (that would double-count
+		// what importGatewayJobs already captured), we only keep them to
+		// borrow their B&W/color split. So: import walk-up only.
+		const printColorRows = rows.filter(
+			(r) => classifySource(r.jobMode) === 'network' && printerRowImpressions(r) > 0
+		);
 		// Skip jobs with no pages at all -- they're cancelled/error entries
 		// with nothing to bill and only clutter the job log.
 		const newRows = rows.filter(
 			(r) =>
 				!existingIds.has(r.printerJobId) &&
-				r.bwCount + r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0) > 0
+				classifySource(r.jobMode) === 'walkup' &&
+				printerRowImpressions(r) > 0
 		);
 
 		const people = await db
@@ -256,7 +418,7 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 			await db.insert(printJob).values({
 				printerJobId: row.printerJobId,
 				jobMode: row.jobMode,
-				source: classifySource(row.jobMode),
+				source: 'walkup',
 				loginName: row.loginName,
 				personId,
 				departmentId,
@@ -291,7 +453,13 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 			});
 		}
 
-		const jobsReconciled = await reconcileUnmatchedJobs();
+		// Capture the gateway's own jobs (attributed by queue, color borrowed
+		// from the Print rows above), then backfill color on any earlier
+		// gateway jobs whose printer row only just arrived.
+		const gatewayJobsNew = await importGatewayJobs(printColorRows);
+		const gatewayColorReconciled = await reconcileGatewayColor(printColorRows);
+
+		const jobsReconciled = (await reconcileUnmatchedJobs()) + gatewayColorReconciled;
 
 		await db
 			.update(syncRun)
@@ -299,11 +467,17 @@ export async function syncPrinterUsage(): Promise<SyncResult> {
 				finishedAt: new Date(),
 				status: 'ok',
 				jobsFound: rows.length,
-				jobsNew: newRows.length
+				jobsNew: newRows.length + gatewayJobsNew
 			})
 			.where(eq(syncRun.id, run.id));
 
-		return { jobsFound: rows.length, jobsNew: newRows.length, jobsReconciled, unmatchedCodes };
+		return {
+			jobsFound: rows.length,
+			jobsNew: newRows.length,
+			gatewayJobsNew,
+			jobsReconciled,
+			unmatchedCodes
+		};
 	} catch (err) {
 		await db
 			.update(syncRun)

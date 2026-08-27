@@ -31,12 +31,14 @@ work; gateway jobs authenticate via the JCLUserNumber code they carry)
 
 The copier's own per-user-code authentication stays **on** (an earlier
 draft planned to switch it off -- reversed, so walk-up codes keep
-working). Gateway jobs authenticate automatically via the account code
-each queue stamps, exactly like a walk-up user's typed code. Billing
-therefore stays on the copier's own Job Log (the single source that has
-every job with authoritative color counts); this gateway's own job data
-drives the dashboard's operational **Gateway** page, not the invoice.
-See `docs/GATEWAY_MIGRATION.md`.
+working). Each queue stamps its account code, but on real hardware the
+copier does **not** reliably log gateway jobs under that code (they show
+as "No Authentication"). So billing is **split**: gateway jobs are
+captured from this gateway (`GET /jobs`, attributed by queue), walk-up
+jobs from the copier's Job Log, and the copier's "Print" rows only lend
+their B&W/color split to the gateway jobs. This gateway's `page_log` is
+therefore a billing source, not just observability. See
+`docs/GATEWAY_MIGRATION.md`.
 
 ## What's in here
 

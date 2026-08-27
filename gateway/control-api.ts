@@ -316,30 +316,30 @@ async function readRecentLog(lines: number): Promise<string[]> {
 		.slice(-lines);
 }
 
-interface PageLogEntry {
+interface GatewayJob {
 	queueName: string;
-	jobId: string;
+	jobId: string; // the CUPS job id (unique per queue)
 	user: string;
-	timestamp: string;
-	pageNumber: number;
-	copies: number;
+	jobName: string;
+	completedAt: string; // ISO8601
+	impressions: number; // total pages printed for the job (pages x copies)
 }
 
 /**
- * Parses CUPS's own structured page_log (one line per printed sheet:
- * `printer user job-id date-time page-number num-copies job-billing
- * host job-originating-user-name`) rather than scraping the copier's
- * HTML admin panel the way the old Sharp Job Log integration did --
- * this is data our own gateway wrote, in a documented format, not a
- * page a firmware update could silently reformat.
+ * Reads the gateway's own page_log and aggregates it into one record per
+ * completed job -- the authoritative record of what actually went through
+ * the gateway. Each line is one printed page (see PageLogFormat in
+ * cupsd.conf):
+ *   printer  cups-job-id  user  page-number  copies  epoch-completed  job-name
+ * A job's total impressions = the sum of `copies` across its page lines.
  *
- * This feeds the dashboard's operational Gateway page (job history/
- * "what's going on"), NOT billing -- with the copier's auth left on,
- * billing comes from the copier's own Job Log, which has authoritative
- * color counts (see docs/GATEWAY_MIGRATION.md). So page_log's known
- * weakness at B&W-vs-color detail doesn't matter here.
+ * This is what the dashboard bills gateway jobs from: it attributes them
+ * by the queue they arrived on (queue -> person+department), so it never
+ * depends on the printer echoing the account code back. The B&W/color
+ * split is filled in dashboard-side from the printer's own Job Log (the
+ * gateway can't see color -- it just streams PostScript through).
  */
-async function readPageLog(sinceIso: string | null): Promise<PageLogEntry[]> {
+async function readPageLog(sinceIso: string | null): Promise<GatewayJob[]> {
 	let raw: string;
 	try {
 		raw = await readFile(PAGE_LOG_PATH, 'utf-8');
@@ -347,29 +347,61 @@ async function readPageLog(sinceIso: string | null): Promise<PageLogEntry[]> {
 		return [];
 	}
 
-	const since = sinceIso ? new Date(sinceIso) : null;
-	const entries: PageLogEntry[] = [];
+	const since = sinceIso ? new Date(sinceIso).getTime() : null;
+
+	// Accumulate per (queue + job id).
+	const jobs = new Map<
+		string,
+		{
+			queueName: string;
+			jobId: string;
+			user: string;
+			jobName: string;
+			epoch: number;
+			impressions: number;
+		}
+	>();
+
 	for (const line of raw.split('\n')) {
 		if (!line.trim()) continue;
 		const parts = line.split(' ');
 		if (parts.length < 6) continue;
-		const [queueName, user, jobId, date, , pageNumber, copies] = parts;
-		// CUPS page_log dates look like "26/Aug/2026:14:32:10 -0500" split
-		// across two space-separated tokens (date+time, then tz) -- rejoin.
-		const tz = parts[4];
-		const timestampRaw = `${date} ${tz}`.replace(/\[|\]/g, '');
-		const timestamp = new Date(timestampRaw);
-		if (since && !isNaN(timestamp.getTime()) && timestamp < since) continue;
-		entries.push({
-			queueName,
-			user,
-			jobId,
-			timestamp: isNaN(timestamp.getTime()) ? timestampRaw : timestamp.toISOString(),
-			pageNumber: Number(pageNumber) || 0,
-			copies: Number(copies) || 1
+		const [queueName, jobId, user, , copies, epoch] = parts;
+		const jobName = parts.slice(6).join(' ') || '(untitled)';
+		const key = `${queueName}-${jobId}`;
+		const existing = jobs.get(key);
+		if (existing) {
+			existing.impressions += Number(copies) || 1;
+			// Keep the latest completion epoch seen for the job.
+			existing.epoch = Math.max(existing.epoch, Number(epoch) || 0);
+		} else {
+			jobs.set(key, {
+				queueName,
+				jobId,
+				user,
+				jobName,
+				epoch: Number(epoch) || 0,
+				impressions: Number(copies) || 1
+			});
+		}
+	}
+
+	const out: GatewayJob[] = [];
+	for (const j of jobs.values()) {
+		const completedMs = j.epoch * 1000;
+		if (since !== null && completedMs && completedMs < since) continue;
+		out.push({
+			queueName: j.queueName,
+			jobId: j.jobId,
+			user: j.user,
+			jobName: j.jobName,
+			completedAt: completedMs ? new Date(completedMs).toISOString() : new Date(0).toISOString(),
+			impressions: j.impressions
 		});
 	}
-	return entries;
+	// Oldest first, so the dashboard imports in job order.
+	out.sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+	return out;
 }
 
 function readBody(req: Parameters<Parameters<typeof createServer>[0]>[0]): Promise<string> {

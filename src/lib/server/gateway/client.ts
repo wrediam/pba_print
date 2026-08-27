@@ -80,15 +80,20 @@ export async function removeGatewayQueue(personCode: string, departmentCode: str
 }
 
 export interface GatewayJobEntry {
-	queueName: string;
+	queueName: string; // e.g. "church_598_61" -- maps to person+department
+	jobId: string; // CUPS job id (unique per queue)
 	user: string;
-	jobId: string;
-	timestamp: string;
-	pageNumber: number;
-	copies: number;
+	jobName: string;
+	completedAt: string; // ISO8601
+	impressions: number; // total pages printed (pages x copies)
 }
 
-/** Pulls page_log entries from the gateway, optionally since a given ISO timestamp. */
+/**
+ * Pulls the gateway's own completed-job records (aggregated from its
+ * page_log), optionally only those completed since a given ISO timestamp.
+ * This is the authoritative source for gateway-originated jobs -- see
+ * syncGatewayUsage() in src/lib/server/printer/sync.ts.
+ */
 export async function fetchGatewayJobs(sinceIso: string | null): Promise<GatewayJobEntry[]> {
 	if (!GATEWAY_URL) return [];
 	const url = new URL(`${GATEWAY_URL}/jobs`);

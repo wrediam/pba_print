@@ -246,3 +246,23 @@ that introduced the gateway model rewrote `add_profile_queue.sh` and
 personal-code verification step, recompiled `Scripts/main.scpt` via
 `osacompile` (the loose source is `Fix Church Printer.applescript` in the
 Desktop project).
+
+**CRITICAL when rebuilding: re-sign the bundle after editing its
+contents.** Changing *any* file inside `Fix Church Printer.app`
+invalidates its sealed code signature, and a bundle with a *broken*
+signature is reported by macOS as **"damaged and can't be opened"** --
+which, unlike the normal "unidentified developer" prompt, right-click →
+Open does NOT bypass. Always finish a rebuild with an ad-hoc re-sign
+before zipping:
+
+```bash
+codesign --remove-signature "Fix Church Printer.app"
+codesign --force --deep -s - "Fix Church Printer.app"
+codesign --verify --deep --strict "Fix Church Printer.app"   # must pass
+```
+
+Ad-hoc signing still won't satisfy Gatekeeper's notarization check, so
+first launch is the "unidentified developer" right-click → Open flow --
+but that flow only works when the signature is *valid*. (The first
+`2026-08-26` rebuild shipped unsigned-after-edit and showed "damaged";
+re-signing fixed it.)

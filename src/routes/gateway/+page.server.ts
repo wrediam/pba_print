@@ -1,4 +1,4 @@
-import type { PageServerLoad } from './$types';
+import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { gatewayQueue, person, department } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -11,6 +11,7 @@ import {
 	type GatewayQueueSummary,
 	type GatewayActiveJob
 } from '$lib/server/gateway/client';
+import { reprovisionAllQueues } from '$lib/server/gateway/provisioning';
 
 // Everything the gateway itself reports is fetched best-effort: if the
 // gateway is down or misconfigured we still render the page (showing the
@@ -77,4 +78,14 @@ export const load: PageServerLoad = async () => {
 		logs: logs.value,
 		logsError: logs.error
 	};
+};
+
+export const actions: Actions = {
+	// Rebuild every queue on the gateway from the dashboard's own records --
+	// the recovery path when the gateway is empty (fresh container / a
+	// redeploy that lost its queues).
+	resync: async () => {
+		const result = await reprovisionAllQueues();
+		return { resynced: result };
+	}
 };

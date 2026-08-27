@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
-	import type { PageData } from './$types';
+	import type { PageData, ActionData } from './$types';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let resyncing = $state(false);
 
 	function fmtBytes(n: number | null): string {
 		if (!n) return '—';
@@ -24,6 +27,23 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			{#if data.configured && data.health.reachable}
+				<form
+					method="POST"
+					action="?/resync"
+					use:enhance={() => {
+						resyncing = true;
+						return async ({ update }) => {
+							await update();
+							resyncing = false;
+						};
+					}}
+				>
+					<Button type="submit" variant="outline" disabled={resyncing}>
+						{resyncing ? 'Re-provisioning…' : 'Re-provision all to gateway'}
+					</Button>
+				</form>
+			{/if}
 			{#if !data.configured}
 				<Badge variant="secondary">Not configured</Badge>
 			{:else if data.health.reachable}
@@ -33,6 +53,17 @@
 			{/if}
 		</div>
 	</div>
+
+	{#if form?.resynced}
+		<Card.Root>
+			<Card.Content class="py-4 text-sm">
+				Re-provisioned {form.resynced.ready} of {form.resynced.total} queue(s) onto the gateway{form
+					.resynced.failed
+					? `, ${form.resynced.failed} failed`
+					: ''}.
+			</Card.Content>
+		</Card.Root>
+	{/if}
 
 	{#if !data.configured}
 		<Card.Root>

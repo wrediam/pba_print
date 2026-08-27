@@ -42,7 +42,12 @@ services:
       GATEWAY_SHARED_SECRET: change-me-gateway-secret # must match the app's value above
       PRINTER_HOST: 192.168.1.222
     volumes:
-      - gateway_cups:/etc/cups/ppd
+      # Persist the WHOLE /etc/cups, not just ppd/ -- the queue definitions
+      # live in /etc/cups/printers.conf, so persisting only ppd/ (the old
+      # setup) still lost every queue on redeploy. The image seeds an empty
+      # volume with package defaults + our cupsd.conf on first boot (see
+      # gateway/entrypoint.sh).
+      - gateway_cups:/etc/cups
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:8631/health || exit 1']
       interval: 10s

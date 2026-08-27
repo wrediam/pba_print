@@ -5,6 +5,15 @@
 # working. Needs bash (not /bin/sh/dash) for `wait -n`.
 set -e
 
+# /etc/cups is a persistent volume so provisioned queues survive redeploys.
+# On first boot it's empty -- seed it from the image snapshot (package
+# config files + our cupsd.conf) WITHOUT clobbering anything already
+# persisted (-n). Then always force-refresh cupsd.conf so image config
+# changes take effect on every deploy.
+mkdir -p /etc/cups
+cp -an /opt/gateway/cups-default/. /etc/cups/ 2>/dev/null || true
+cp -f /opt/gateway/cups-default/cupsd.conf /etc/cups/cupsd.conf
+
 mkdir -p /run/cups /var/log/cups /var/spool/cups /etc/cups/ppd
 
 echo "[gateway] starting cupsd..."

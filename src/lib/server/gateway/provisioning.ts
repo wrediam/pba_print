@@ -85,6 +85,34 @@ export async function reprovisionForDepartmentCodeChange(
 	}
 }
 
+/**
+ * Rebuilds every queue the dashboard knows about (from gateway_queue) on
+ * the gateway. The dashboard's own table is the source of truth, so this
+ * recreates the actual CUPS queues from it -- the recovery path when the
+ * gateway comes up empty (a fresh container, or a redeploy that lost its
+ * queues). Safe to run any time; ensureQueue() is idempotent.
+ */
+export async function reprovisionAllQueues(): Promise<{
+	total: number;
+	ready: number;
+	failed: number;
+}> {
+	if (!isGatewayConfigured()) return { total: 0, ready: 0, failed: 0 };
+
+	const rows = await db
+		.select({ personId: gatewayQueue.personId, departmentId: gatewayQueue.departmentId })
+		.from(gatewayQueue);
+
+	let ready = 0;
+	let failed = 0;
+	for (const row of rows) {
+		const res = await ensureQueue(row.personId, row.departmentId);
+		if (res.status === 'ready') ready++;
+		else failed++;
+	}
+	return { total: rows.length, ready, failed };
+}
+
 /** Same idea as reprovisionForDepartmentCodeChange(), but for a person's own code changing. */
 export async function reprovisionForPersonCodeChange(personId: number, oldCode: string): Promise<void> {
 	if (!isGatewayConfigured()) return;

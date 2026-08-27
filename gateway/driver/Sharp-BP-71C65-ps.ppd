@@ -1313,17 +1313,19 @@
 *UIConstraints: *ARwmOutline True		*ARwmTransparent Trans75
 
 *% ---- Color Mode <---> Image Type --------------------------------------------
-*UIConstraints: *ARCMode CMBW			*ARCOType COTGraphics
-*UIConstraints: *ARCMode CMBW			*ARCOType COTPhoto
-*UIConstraints: *ARCMode CMBW			*ARCOType COTCAD
-*UIConstraints: *ARCMode CMBW			*ARCOType COTScan
-*UIConstraints: *ARCMode CMBW			*ARCOType COTColorimetric
-*UIConstraints: *ARCMode CMBW			*ARCOType COTCustom
+*% (ARCMode renamed to the CUPS-standard ColorModel keyword below --
+*% these constraints updated to match, same original intent.)
+*UIConstraints: *ColorModel Gray			*ARCOType COTGraphics
+*UIConstraints: *ColorModel Gray			*ARCOType COTPhoto
+*UIConstraints: *ColorModel Gray			*ARCOType COTCAD
+*UIConstraints: *ColorModel Gray			*ARCOType COTScan
+*UIConstraints: *ColorModel Gray			*ARCOType COTColorimetric
+*UIConstraints: *ColorModel Gray			*ARCOType COTCustom
 
 *% ---- Color Mode <---> Output Profile ----------------------------------------
-*UIConstraints: *ARCMode CMBW			*ARCOProfile OPPhoto
-*UIConstraints: *ARCMode CMBW			*ARCOProfile OPGraphics
-*UIConstraints: *ARCMode CMBW			*ARCOProfile OPCustom
+*UIConstraints: *ColorModel Gray			*ARCOProfile OPPhoto
+*UIConstraints: *ColorModel Gray			*ARCOProfile OPGraphics
+*UIConstraints: *ColorModel Gray			*ARCOProfile OPCustom
 
 *% ---- Print Mode <---> Trapping ----------------------------------------------
 *UIConstraints: *ARCPPriority Normal		*ARCTrapping TM2
@@ -1514,10 +1516,10 @@
 *UIConstraints: *ARCSProfile SPNone		*ARCIntent IAbsolute
 
 *% ---- Color Mode <---> Document Control Print Color --------------------------
-*UIConstraints: *ARCMode CMAuto			*ARDocColor DCCyan
-*UIConstraints: *ARCMode CMAuto			*ARDocColor DCYellow
-*UIConstraints: *ARCMode CMBW			*ARDocColor DCCyan
-*UIConstraints: *ARCMode CMBW			*ARDocColor DCYellow
+*UIConstraints: *ColorModel Auto			*ARDocColor DCCyan
+*UIConstraints: *ColorModel Auto			*ARDocColor DCYellow
+*UIConstraints: *ColorModel Gray			*ARDocColor DCCyan
+*UIConstraints: *ColorModel Gray			*ARDocColor DCYellow
 
 *% ---- Document Filing <---> PIN Code(Retention) ------------------------------
 *UIConstraints: *JCLRetentionSetting None	*CustomJCLRetentionPassword True
@@ -2675,18 +2677,31 @@
 *% *****************************************************************************
 
 *% **** Color Mode *************************************************************
-*OpenUI *ARCMode/Color Mode: PickOne
-*OrderDependency: 180 AnySetup *ARCMode
-*DefaultARCMode: CMAuto
-*ARCMode CMAuto/Automatic: "
+*% Renamed from Sharp's own "ARCMode" to CUPS's standard "ColorModel"
+*% keyword -- same PostScript setcolormode calls, same choices, just
+*% re-keyed. This is the actual fix (not new behavior): CUPS's IPP layer
+*% only auto-translates the standard print-color-mode job attribute --
+*% what a client's Color/Grayscale dialog selection actually becomes on
+*% the wire -- into a PPD option specifically named "ColorModel". With
+*% the vendor's original "ARCMode" name, that translation silently never
+*% happened at all, so a job's own color choice was always ignored in
+*% favor of whatever this option's queue-wide default happened to be --
+*% confirmed live: a job explicitly sent as black-and-white still showed
+*% up in the copier's own Job Log as color, because CMAuto's per-page
+*% auto-detection (the previous default) is what actually decided, not
+*% the sender's selection.
+*OpenUI *ColorModel/Color Mode: PickOne
+*OrderDependency: 180 AnySetup *ColorModel
+*DefaultColorModel: Gray
+*ColorModel Auto/Automatic: "
 	userdict /ARCMode known not {userdict /ARCMode 0 put} if
 	0 setcolormode"
 *End
-*ARCMode CMColor/Color: "
+*ColorModel RGB/Color: "
 	userdict /ARCMode known not {userdict /ARCMode 1 put} if
 	1 setcolormode"
 *End
-*ARCMode CMBW/Black and White: "
+*ColorModel Gray/Black and White: "
 	userdict /ARCMode known not {userdict /ARCMode 2 put} if
 	userdict /ARCIntent known not {userdict /ARCIntent 4 put} if
 	userdict /ARCNGray known not {userdict /ARCNGray 2 put} if
@@ -2694,7 +2709,7 @@
 	userdict /ARCPureB known not {userdict /ARCPureB 2 put} if
 	2 setcolormode"
 *End
-*CloseUI: *ARCMode
+*CloseUI: *ColorModel
 *% *****************************************************************************
 
 *% **** Neutral Gray ***********************************************************

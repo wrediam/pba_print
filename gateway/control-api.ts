@@ -84,7 +84,7 @@ interface ProvisionRequest {
 	personCode: string;
 	departmentCode: string;
 	departmentLabel?: string;
-	colorMode?: 'CMBW' | 'CMAuto' | 'CMColor'; // defaults to CMAuto -- see note in provisionQueue
+	colorMode?: 'Gray' | 'Auto' | 'RGB'; // defaults to Gray -- see note in provisionQueue
 }
 
 interface ProvisionResult {
@@ -142,24 +142,35 @@ async function provisionQueue(req: ProvisionRequest): Promise<ProvisionResult> {
 			'-D',
 			description,
 			...HARDWARE_OPTS,
-			// ARCMode is the account's *color restriction*, not the per-job
-			// color choice:
-			//   CMAuto -- (the PPD's own default) let each job carry color
-			//             only when the user explicitly selects it in the
-			//             print dialog. This is the standing decision: every
-			//             department gets color.
-			//   CMBW   -- force mono regardless of the dialog (still passable
-			//             per-queue via colorMode for a mono-only department).
+			// ColorModel (renamed from Sharp's own "ARCMode" -- see the
+			// PPD's own comments in Sharp-BP-71C65-ps.ppd for why) is this
+			// queue's *default* color mode, used only when a job doesn't
+			// specify its own. Because this is now the CUPS-standard
+			// "ColorModel" keyword, a client's actual Color/Grayscale
+			// dialog selection (sent as the standard IPP print-color-mode
+			// attribute) overrides this on a per-job basis automatically --
+			// this default only matters for jobs that don't specify one.
+			//   Gray -- (this default) safe/reliable; matches the original,
+			//           proven-stable behavior before per-job color mode
+			//           selection was wired up at all.
+			//   Auto -- let the copier's own per-page detection decide.
+			//           NOT recommended as a default: confirmed unreliable
+			//           in the field (bills clearly-B&W content as color
+			//           on anti-aliasing/rendering artifacts).
+			//   RGB  -- force color regardless of the dialog.
 			// IMPORTANT copier-side dependency: the copier enforces a
-			// per-department *color authority*. A CMAuto job that asks for
-			// color from a department NOT granted color authority is rejected
-			// outright with Sharp error 0435 (documented from the field in the
-			// macOS installer's add_profile_queue.sh). Defaulting to CMAuto
-			// assumes the office has granted color authority to every
-			// department on the copier -- if one is left mono-only there,
-			// pass colorMode:'CMBW' for its queue so its color jobs don't 0435.
+			// per-department *color authority*. A job that asks for color
+			// from a department NOT granted color authority is rejected
+			// outright with Sharp error 0435 (documented from the field in
+			// the macOS installer's add_profile_queue.sh) -- if a
+			// department is mono-only there, its queue should also get
+			// colorMode:'Gray' at provisioning time so the dialog's Color
+			// option (if selected accidentally) is at least a no-op rather
+			// than a rejected job. Whether that's still relevant now that
+			// the copier's own auth is meant to be fully disabled is worth
+			// re-checking on-site.
 			'-o',
-			`ARCMode=${req.colorMode ?? 'CMAuto'}`,
+			`ColorModel=${req.colorMode ?? 'Gray'}`,
 			'-o',
 			`JCLUserNumber=Custom.${fullCode}`
 		]);

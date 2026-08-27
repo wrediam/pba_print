@@ -177,30 +177,55 @@ function printerRowImpressions(r: PrinterJobLogRow): number {
 	return r.bwCount + r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0);
 }
 
+interface ColorMatch {
+	bwCount: number;
+	colorCount: number;
+}
+
 /**
  * The gateway can attribute a job (which queue -> which person+department)
  * and count its pages, but it cannot see color -- only the copier counts
- * that. So for each gateway job we find the copier's own Job Log row for the
- * same physical print (matched on identical page count, closest in time
- * within a window) and borrow its authoritative B&W/color split. Returns
- * null if no plausible match, in which case the job is billed all-B&W until
- * a later sync finds its printer row.
+ * that. So each gateway job needs to be matched to the copier's own Job Log
+ * row for the same physical print (same page count, closest in time within
+ * a window) to borrow its authoritative B&W/color split.
+ *
+ * Matches the WHOLE batch at once with each printer row claimed by AT MOST
+ * ONE gateway job, closest-distance-first -- matching job-by-job
+ * independently (the previous approach) let two different gateway jobs
+ * with the same page count and close timestamps both claim the *same*
+ * printer row, which is exactly what was confirmed happening with two
+ * back-to-back same-length jobs (one B&W, one color) both ending up
+ * classified as color: whichever row was numerically closest in time won
+ * for both, since neither match accounted for the other's claim.
+ *
+ * Jobs with no plausible match are simply absent from the returned map, in
+ * which case the caller bills them all-B&W until a later sync finds their
+ * printer row.
  */
-function borrowColor(
-	gw: { completedAt: Date; impressions: number },
+function matchColorForJobs<T extends { completedAt: Date; impressions: number }>(
+	jobs: T[],
 	printRows: PrinterJobLogRow[]
-): { bwCount: number; colorCount: number } | null {
-	const target = gw.completedAt.getTime();
-	let best: { bw: number; color: number; dist: number } | null = null;
-	for (const r of printRows) {
-		if (printerRowImpressions(r) !== gw.impressions) continue;
-		const t = (r.completedAt ?? r.startedAt).getTime();
-		const dist = Math.abs(t - target);
-		if (dist > COLOR_MATCH_WINDOW_MS) continue;
-		const color = r.fullColorCount + (r.twoColorCount ?? 0) + (r.singleColorCount ?? 0);
-		if (!best || dist < best.dist) best = { bw: r.bwCount, color, dist };
+): Map<T, ColorMatch> {
+	const candidates: { job: T; row: PrinterJobLogRow; dist: number }[] = [];
+	for (const job of jobs) {
+		for (const row of printRows) {
+			if (printerRowImpressions(row) !== job.impressions) continue;
+			const dist = Math.abs((row.completedAt ?? row.startedAt).getTime() - job.completedAt.getTime());
+			if (dist > COLOR_MATCH_WINDOW_MS) continue;
+			candidates.push({ job, row, dist });
+		}
 	}
-	return best ? { bwCount: best.bw, colorCount: best.color } : null;
+	candidates.sort((a, b) => a.dist - b.dist);
+
+	const result = new Map<T, ColorMatch>();
+	const usedRows = new Set<PrinterJobLogRow>();
+	for (const c of candidates) {
+		if (result.has(c.job) || usedRows.has(c.row)) continue;
+		usedRows.add(c.row);
+		const colorCount = c.row.fullColorCount + (c.row.twoColorCount ?? 0) + (c.row.singleColorCount ?? 0);
+		result.set(c.job, { bwCount: c.row.bwCount, colorCount });
+	}
+	return result;
 }
 
 /**
@@ -247,17 +272,20 @@ async function importGatewayJobs(printColorRows: PrinterJobLogRow[]): Promise<nu
 		.from(gatewayQueue);
 	const queueByName = new Map(queues.map((q) => [q.queueName, q]));
 
+	const newJobs = gwJobs
+		.filter((j) => !existingKeys.has(`${j.queueName}-${j.jobId}`) && j.impressions > 0)
+		.map((j) => ({ j, completedAt: new Date(j.completedAt), impressions: j.impressions }));
+	const colorByJob = matchColorForJobs(newJobs, printColorRows);
+
 	let imported = 0;
-	for (const j of gwJobs) {
-		const key = `${j.queueName}-${j.jobId}`;
-		if (existingKeys.has(key) || j.impressions <= 0) continue;
+	for (const entry of newJobs) {
+		const { j, completedAt } = entry;
 		const q = queueByName.get(j.queueName);
-		const completedAt = new Date(j.completedAt);
-		const color = borrowColor({ completedAt, impressions: j.impressions }, printColorRows);
+		const color = colorByJob.get(entry);
 		const bwCount = color ? color.bwCount : j.impressions;
 		const colorCount = color ? color.colorCount : 0;
 		await db.insert(printJob).values({
-			gatewayJobKey: key,
+			gatewayJobKey: `${j.queueName}-${j.jobId}`,
 			jobMode: 'Print',
 			source: 'network',
 			loginName: q?.fullCode ?? null,
@@ -294,13 +322,14 @@ async function reconcileGatewayColor(printColorRows: PrinterJobLogRow[]): Promis
 		.from(printJob)
 		.where(and(eq(printJob.source, 'network'), eq(printJob.colorFromPrinter, false)));
 
+	const candidates = pending
+		.filter((job) => job.completedAt != null)
+		.map((job) => ({ job, completedAt: new Date(job.completedAt as Date), impressions: job.totalCount }));
+	const colorByJob = matchColorForJobs(candidates, printColorRows);
+
 	let fixed = 0;
-	for (const job of pending) {
-		if (!job.completedAt) continue;
-		const color = borrowColor(
-			{ completedAt: new Date(job.completedAt), impressions: job.totalCount },
-			printColorRows
-		);
+	for (const entry of candidates) {
+		const color = colorByJob.get(entry);
 		if (!color) continue;
 		await db
 			.update(printJob)
@@ -311,7 +340,7 @@ async function reconcileGatewayColor(printColorRows: PrinterJobLogRow[]): Promis
 				fullColorCount: color.colorCount,
 				colorFromPrinter: true
 			})
-			.where(eq(printJob.id, job.id));
+			.where(eq(printJob.id, entry.job.id));
 		fixed++;
 	}
 	return fixed;

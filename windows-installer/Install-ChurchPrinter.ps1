@@ -107,7 +107,6 @@ Get-Printer -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'Church
 }
 
 # 5. Provision + add each selected queue ------------------------------------
-$driver = 'Microsoft IPP Class Driver'
 $results = @()
 foreach ($d in $selected) {
 	$deptCode = "$($d.code)"
@@ -131,13 +130,27 @@ foreach ($d in $selected) {
 		if (Get-Printer -Name $name -ErrorAction SilentlyContinue) {
 			Remove-Printer -Name $name -ErrorAction SilentlyContinue
 		}
-		# Deliberately NOT calling Add-PrinterPort first -- the "port type"
-		# for a plain IPP URL isn't actually implemented in that cmdlet (it
-		# only knows about local/TCP/LPR ports), so it always failed here
-		# with a generic "operation failed" error no matter what the URL
-		# was. Add-Printer itself creates the right port when handed a URL
-		# PortName directly -- that's the documented, supported way.
-		Add-Printer -Name $name -DriverName $driver -PortName $portUrl -ErrorAction Stop
+		# -IppURL (NOT -PortName/-DriverName) is what makes Windows actually
+		# perform IPP "directed discovery" -- a real handshake with the
+		# gateway to fetch its real capabilities (duplex, finishings,
+		# copies) before creating the queue. -PortName + -DriverName (the
+		# previous approach here) just registers the URL as a bare port
+		# without ever querying it, so the class driver fell back to a
+		# capability-less default and the print dialog showed no options
+		# at all -- confirmed on a real install.
+		#
+		# -IppURL doesn't accept -Name, so Windows names the printer
+		# itself (usually after whatever name the gateway's queue reports
+		# over IPP) -- diff Get-Printer before/after to find the one that
+		# just appeared, then rename it to our own convention.
+		$before = @(Get-Printer -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+		Add-Printer -IppURL $portUrl -ErrorAction Stop
+		Start-Sleep -Milliseconds 500
+		$added = Get-Printer -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Name } | Select-Object -First 1
+		if ($added -and $added.Name -ne $name) {
+			if (Get-Printer -Name $name -ErrorAction SilentlyContinue) { Remove-Printer -Name $name -ErrorAction SilentlyContinue }
+			Rename-Printer -Name $added.Name -NewName $name
+		}
 		$results += "OK      $($d.label)  ->  $name"
 	} catch {
 		$results += "FAILED  $($d.label): $($_.Exception.Message)"

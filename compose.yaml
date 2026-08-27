@@ -20,7 +20,16 @@ services:
       # the print URI the macOS installer points each Mac at.
       GATEWAY_PUBLIC_HOST: 192.168.8.235:631
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/ || exit 1']
+      # node (always present in these images) instead of wget/curl, which
+      # aren't installed in the slim base -- that's why the containers
+      # showed "unhealthy" even while serving fine.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://localhost:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,7 +58,13 @@ services:
       # gateway/entrypoint.sh).
       - gateway_cups:/etc/cups
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:8631/health || exit 1']
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://localhost:8631/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
       interval: 10s
       timeout: 5s
       retries: 5

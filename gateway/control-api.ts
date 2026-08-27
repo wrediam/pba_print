@@ -325,19 +325,38 @@ interface GatewayJob {
 	impressions: number; // total pages printed for the job (pages x copies)
 }
 
+const CLF_MONTHS: Record<string, number> = {
+	Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+	Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
+};
+
+// Parses a CLF timestamp like "27/Aug/2026:13:36:36 +0000" (CUPS %T, with
+// the surrounding brackets already stripped) into a Date. Returns null if
+// it doesn't match.
+function parseClf(s: string): Date | null {
+	const m = s.match(/(\d{2})\/(\w{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})\s*([+-]\d{4})/);
+	if (!m) return null;
+	const [, dd, mon, yyyy, HH, MM, SS, tz] = m;
+	const month = CLF_MONTHS[mon];
+	if (month === undefined) return null;
+	const offMin = (tz[0] === '-' ? -1 : 1) * (Number(tz.slice(1, 3)) * 60 + Number(tz.slice(3, 5)));
+	return new Date(Date.UTC(+yyyy, month, +dd, +HH, +MM, +SS) - offMin * 60000);
+}
+
 /**
- * Reads the gateway's own page_log and aggregates it into one record per
- * completed job -- the authoritative record of what actually went through
- * the gateway. Each line is one printed page (see PageLogFormat in
- * cupsd.conf):
- *   printer  cups-job-id  user  page-number  copies  epoch-completed  job-name
- * A job's total impressions = the sum of `copies` across its page lines.
+ * Reads the gateway's own page_log -- the authoritative record of what went
+ * through the gateway -- and returns one record per completed job. CUPS
+ * writes a "total" summary line per job (see PageLogFormat in cupsd.conf):
+ *   printer  cups-job-id  user  total  <pages>  [%T]  job-name
+ * We key off that line: `pages` is the job's total impressions, and %T is
+ * its completion time. (Any per-page lines are ignored so we don't double
+ * count.)
  *
- * This is what the dashboard bills gateway jobs from: it attributes them
- * by the queue they arrived on (queue -> person+department), so it never
- * depends on the printer echoing the account code back. The B&W/color
- * split is filled in dashboard-side from the printer's own Job Log (the
- * gateway can't see color -- it just streams PostScript through).
+ * This is what the dashboard bills gateway jobs from: it attributes them by
+ * the queue they arrived on (queue -> person+department), so it never
+ * depends on the printer echoing the account code back. The B&W/color split
+ * is filled in dashboard-side from the printer's own Job Log (the gateway
+ * can't see color -- it just streams PostScript through).
  */
 async function readPageLog(sinceIso: string | null): Promise<GatewayJob[]> {
 	let raw: string;
@@ -348,60 +367,58 @@ async function readPageLog(sinceIso: string | null): Promise<GatewayJob[]> {
 	}
 
 	const since = sinceIso ? new Date(sinceIso).getTime() : null;
-
-	// Accumulate per (queue + job id).
-	const jobs = new Map<
-		string,
-		{
-			queueName: string;
-			jobId: string;
-			user: string;
-			jobName: string;
-			epoch: number;
-			impressions: number;
-		}
-	>();
-
-	for (const line of raw.split('\n')) {
-		if (!line.trim()) continue;
-		const parts = line.split(' ');
-		if (parts.length < 6) continue;
-		const [queueName, jobId, user, , copies, epoch] = parts;
-		const jobName = parts.slice(6).join(' ') || '(untitled)';
-		const key = `${queueName}-${jobId}`;
-		const existing = jobs.get(key);
-		if (existing) {
-			existing.impressions += Number(copies) || 1;
-			// Keep the latest completion epoch seen for the job.
-			existing.epoch = Math.max(existing.epoch, Number(epoch) || 0);
-		} else {
-			jobs.set(key, {
-				queueName,
-				jobId,
-				user,
-				jobName,
-				epoch: Number(epoch) || 0,
-				impressions: Number(copies) || 1
-			});
-		}
-	}
-
 	const out: GatewayJob[] = [];
-	for (const j of jobs.values()) {
-		const completedMs = j.epoch * 1000;
-		if (since !== null && completedMs && completedMs < since) continue;
+
+	for (const rawLine of raw.split('\n')) {
+		// Some CUPS builds wrap the line in quotes -- strip them.
+		const line = rawLine.trim().replace(/^"|"$/g, '');
+		if (!line) continue;
+		const parts = line.split(' ');
+		if (parts.length < 7) continue;
+		const [queueName, jobId, user, pageNum, copies, dateTok, tzTok] = parts;
+		// Only the per-job "total" summary line; skip individual page lines.
+		if (pageNum !== 'total') continue;
+		const completed = parseClf(`${dateTok} ${tzTok}`.replace(/[[\]]/g, ''));
+		if (!completed) continue;
+		if (since !== null && completed.getTime() < since) continue;
 		out.push({
-			queueName: j.queueName,
-			jobId: j.jobId,
-			user: j.user,
-			jobName: j.jobName,
-			completedAt: completedMs ? new Date(completedMs).toISOString() : new Date(0).toISOString(),
-			impressions: j.impressions
+			queueName,
+			jobId,
+			user,
+			jobName: parts.slice(7).join(' ') || '(untitled)',
+			completedAt: completed.toISOString(),
+			impressions: Number(copies) || 0
 		});
 	}
+
 	// Oldest first, so the dashboard imports in job order.
 	out.sort((a, b) => a.completedAt.localeCompare(b.completedAt));
 	return out;
+}
+
+/**
+ * A one-shot troubleshooting dump: the raw tails of page_log and error_log,
+ * the effective PageLogFormat, and lpstat's view of queues/jobs. Lets us
+ * debug what's actually happening on the gateway from the dashboard (or a
+ * curl) without shelling into the container each time.
+ */
+async function debugDump() {
+	const tail = async (p: string, n: number) =>
+		(await readFile(p, 'utf-8').catch(() => ''))
+			.split('\n')
+			.filter((l) => l.trim())
+			.slice(-n);
+	const run = async (cmd: string, args: string[]) =>
+		(await execFileAsync(cmd, args).catch((e) => ({ stdout: String(e) }))).stdout.trim();
+	const cupsdConf = await readFile('/etc/cups/cupsd.conf', 'utf-8').catch(() => '');
+	return {
+		pageLogFormat: cupsdConf.split('\n').filter((l) => /PageLogFormat/i.test(l)),
+		pageLogTail: await tail(PAGE_LOG_PATH, 50),
+		errorLogTail: await tail(ERROR_LOG_PATH, 80),
+		completedJobs: await run('lpstat', ['-W', 'completed', '-o']),
+		queues: await run('lpstat', ['-v']),
+		printers: await run('lpstat', ['-p'])
+	};
 }
 
 function readBody(req: Parameters<Parameters<typeof createServer>[0]>[0]): Promise<string> {
@@ -478,6 +495,14 @@ const server = createServer(async (req, res) => {
 			const jobs = await listActiveJobs();
 			res.writeHead(200, { 'content-type': 'application/json' });
 			res.end(JSON.stringify(jobs));
+			return;
+		}
+
+		// One-shot troubleshooting dump (page_log/error_log tails + lpstat).
+		if (req.method === 'GET' && url.pathname === '/debug') {
+			const dump = await debugDump();
+			res.writeHead(200, { 'content-type': 'application/json' });
+			res.end(JSON.stringify(dump, null, 2));
 			return;
 		}
 

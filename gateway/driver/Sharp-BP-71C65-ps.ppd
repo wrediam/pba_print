@@ -2225,6 +2225,26 @@
 *CloseUI: *ARPunch
 *% *****************************************************************************
 
+*% Maps standard IPP "finishings" enum values (RFC 8011 / PWG5100.1) to
+*% the vendor-named ARStaple/ARPunch options above -- without this, CUPS
+*% has no way to know ARStaple/ARPunch correspond to finishings at all
+*% (they're not standard PPD keywords), so finishings-supported reported
+*% "none" over IPP even though the printer clearly has a stapler/punch
+*% installed (confirmed: `ipptool get-printer-attributes` showed
+*% finishings-supported=none before this was added, while sides-supported
+*% and copies-supported were both already correct -- those work through
+*% CUPS's own standard Duplex/copies handling, which needs no such
+*% mapping). Only the coarse/bare enum values are mapped, not the
+*% position-specific ones (staple-top-left, punch-top-left, etc.) --
+*% this PPD's own ARStaple/ARPunch choices are about staple/hole COUNT,
+*% not corner position, so there's no clean position to declare.
+*% "punch" defaults to the 3-hole choice to match this copier's actually
+*% installed punch module (Option9=PModule33, set in HARDWARE_OPTS in
+*% gateway/control-api.ts) -- change here too if that module ever changes.
+*cupsIPPFinishings 4/staple: "*ARStaple Staple1"
+*cupsIPPFinishings 8/saddle-stitch: "*ARStaple Staple4"
+*cupsIPPFinishings 5/punch: "*ARPunch Punch3"
+
 *% **** Booklet ****************************************************************
 *OpenUI *ARBooklet/Booklet: Boolean
 *OrderDependency: 100.0 AnySetup *ARBooklet

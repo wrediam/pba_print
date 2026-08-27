@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -8,6 +10,17 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	let resyncing = $state(false);
+
+	// Auto-refresh the live queue / status / log every few seconds so the
+	// page reflects the gateway in near-real-time (jobs pass through in
+	// well under a second, so a static snapshot almost never catches one).
+	let autoRefresh = $state(true);
+	onMount(() => {
+		const id = setInterval(() => {
+			if (autoRefresh && !resyncing) invalidateAll();
+		}, 4000);
+		return () => clearInterval(id);
+	});
 
 	function fmtBytes(n: number | null): string {
 		if (!n) return '—';
@@ -173,8 +186,20 @@
 	<!-- Live queue: jobs accepted but not yet finished at the copier. -->
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Live Queue</Card.Title>
-			<Card.Description>Jobs sent to the gateway that haven't finished printing yet.</Card.Description>
+			<div class="flex items-center justify-between">
+				<div>
+					<Card.Title>Live Queue</Card.Title>
+					<Card.Description>
+						Jobs sent to the gateway that haven't finished printing yet. Jobs usually complete in
+						under a second, so this is often empty even right after printing — the finished job shows
+						in the queue's history (click a queue above).
+					</Card.Description>
+				</div>
+				<label class="flex items-center gap-2 text-sm text-muted-foreground">
+					<input type="checkbox" bind:checked={autoRefresh} />
+					Auto-refresh
+				</label>
+			</div>
 		</Card.Header>
 		<Card.Content>
 			{#if data.activeJobsError}

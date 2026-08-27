@@ -402,25 +402,31 @@ async function readPageLog(sinceIso: string | null): Promise<GatewayJob[]> {
 	const since = sinceIso ? new Date(sinceIso).getTime() : null;
 	const out: GatewayJob[] = [];
 
+	// Strip any surrounding quotes CUPS may add to a field. Queue names and
+	// job ids never legitimately contain a quote, so removing them all is
+	// safe -- and it's essential, because a stray quote on the queue name
+	// (e.g. `"church_598_61`) makes the queue->person/department lookup miss
+	// and the job land unassigned.
+	const unquote = (s: string) => (s ?? '').replace(/"/g, '');
+
 	for (const rawLine of raw.split('\n')) {
-		// Some CUPS builds wrap the line in quotes -- strip them.
-		const line = rawLine.trim().replace(/^"|"$/g, '');
+		const line = rawLine.trim();
 		if (!line) continue;
 		const parts = line.split(' ');
 		if (parts.length < 7) continue;
-		const [queueName, jobId, user, pageNum, copies, dateTok, tzTok] = parts;
+		const pageNum = unquote(parts[3]);
 		// Only the per-job "total" summary line; skip individual page lines.
 		if (pageNum !== 'total') continue;
-		const completed = parseClf(`${dateTok} ${tzTok}`.replace(/[[\]]/g, ''));
+		const completed = parseClf(`${unquote(parts[5])} ${unquote(parts[6])}`.replace(/[[\]]/g, ''));
 		if (!completed) continue;
 		if (since !== null && completed.getTime() < since) continue;
 		out.push({
-			queueName,
-			jobId,
-			user,
-			jobName: parts.slice(7).join(' ') || '(untitled)',
+			queueName: unquote(parts[0]),
+			jobId: unquote(parts[1]),
+			user: unquote(parts[2]),
+			jobName: parts.slice(7).join(' ').replace(/^"|"$/g, '') || '(untitled)',
 			completedAt: completed.toISOString(),
-			impressions: Number(copies) || 0
+			impressions: Number(unquote(parts[4])) || 0
 		});
 	}
 

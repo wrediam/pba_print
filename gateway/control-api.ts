@@ -26,9 +26,24 @@ const PRINTER_HOST = process.env.PRINTER_HOST ?? '192.168.1.222';
 const PRINTER_PORT = process.env.PRINTER_RAW_PORT ?? '9100';
 const PPD_PATH = process.env.PPD_PATH ?? '/opt/gateway/driver/Sharp-BP-71C65-ps.ppd';
 const PAGE_LOG_PATH = process.env.PAGE_LOG_PATH ?? '/var/log/cups/page_log';
+// The LAN-reachable hostname/IP for THIS container, as far as a client
+// Mac/PC is concerned -- NOT "localhost" (that would resolve to the
+// client itself once handed back to it, which is exactly the bug that
+// made every single queue fail on the Windows installer: it got back
+// "ipp://localhost:631/...", tried to point its own printer port at
+// itself, and every Add-Printer call failed identically). Must be set
+// to whatever address client machines can actually reach this gateway
+// container at (e.g. the Docker host's LAN IP) -- see compose.yaml.
+const GATEWAY_PUBLIC_HOST = process.env.GATEWAY_PUBLIC_HOST;
 
 if (!SHARED_SECRET) {
 	console.error('[gateway] GATEWAY_SHARED_SECRET is not set -- refusing to start.');
+	process.exit(1);
+}
+if (!GATEWAY_PUBLIC_HOST) {
+	console.error(
+		'[gateway] GATEWAY_PUBLIC_HOST is not set -- refusing to start (queues would be provisioned with unreachable URIs).'
+	);
 	process.exit(1);
 }
 
@@ -177,7 +192,12 @@ async function provisionQueue(req: ProvisionRequest): Promise<ProvisionResult> {
 			};
 		}
 
-		return { queueName, uri: `ipp://localhost:631/printers/${queueName}`, fullCode, status: 'ready' };
+		return {
+			queueName,
+			uri: `ipp://${GATEWAY_PUBLIC_HOST}:631/printers/${queueName}`,
+			fullCode,
+			status: 'ready'
+		};
 	} catch (err) {
 		return {
 			queueName,

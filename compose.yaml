@@ -15,10 +15,6 @@ services:
       SYNC_INTERVAL_SECONDS: 30
       GATEWAY_URL: http://gateway:8631
       GATEWAY_SHARED_SECRET: change-me-gateway-secret
-      # LAN address of the gateway's 631 port as client Macs reach it --
-      # the host publishing "631:631" below (this same host). Used to build
-      # the print URI the macOS installer points each Mac at.
-      GATEWAY_PUBLIC_HOST: 192.168.8.235:631
     healthcheck:
       # node (always present in these images) instead of wget/curl, which
       # aren't installed in the slim base -- that's why the containers
@@ -50,6 +46,12 @@ services:
     environment:
       GATEWAY_SHARED_SECRET: change-me-gateway-secret # must match the app's value above
       PRINTER_HOST: 192.168.1.222
+      # LAN address client Macs/PCs can reach THIS gateway container at --
+      # must NOT be "localhost"/"gateway" (those only resolve correctly
+      # from inside the app's own Docker network, not from a client
+      # machine on the LAN). This is the host publishing "631:631" below
+      # -- bare host/IP only, no port (the code appends :631 itself).
+      GATEWAY_PUBLIC_HOST: 192.168.8.235
     volumes:
       # Persist the WHOLE /etc/cups, not just ppd/ -- the queue definitions
       # live in /etc/cups/printers.conf, so persisting only ppd/ (the old

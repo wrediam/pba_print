@@ -1,2 +1,11 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Force LF regardless of platform/editor -- these run inside Linux
+# containers, where a CRLF shebang line ("#!/bin/bash\r") fails with a
+# confusing "no such file or directory" instead of an obvious syntax
+# error. Editing these from Windows previously introduced exactly that
+# bug in gateway/entrypoint.sh.
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf

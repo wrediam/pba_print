@@ -5,8 +5,25 @@ import { startScheduler } from '$lib/server/scheduler';
 
 // Routes reachable without being logged in.
 // /download-app is intentionally public so anyone on the network can
-// grab the macOS setup app without needing a login (IT, staff, etc.).
-const PUBLIC_PATHS = ['/login', '/download-app', '/download-app/file', '/api/departments'];
+// grab the setup app without needing a login (IT, staff, etc.) -- the
+// startsWith check below also covers /download-app/file and
+// /download-app/windows.
+//
+// The /api/* entries are the endpoints the installer app calls during
+// setup, with no human logged in: the department list, the personal-code
+// check, and gateway-queue provisioning. They must be public or the
+// installer just gets bounced to /login (a 303 that curl surfaces as an
+// empty body, which the installer then misreports as "couldn't reach the
+// server"). These endpoints do their own validation (unknown/inactive
+// codes are rejected) and this is a LAN-only tool.
+const PUBLIC_PATHS = [
+	'/login',
+	'/download-app',
+	'/download-app/file',
+	'/api/departments',
+	'/api/people/verify',
+	'/api/gateway/provision'
+];
 
 // Runs once when the server process starts (top-level module code, not
 // per-request) to begin the periodic printer sync.

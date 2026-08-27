@@ -62,29 +62,40 @@ $ans = Read-Host "If that's not you, type N to cancel. Continue? [Y/n]"
 if ($ans -match '^[Nn]') { exit 0 }
 
 # 3. Departments -------------------------------------------------------------
+# Use Invoke-WebRequest + ConvertFrom-Json rather than Invoke-RestMethod:
+# on Windows PowerShell 5.1 the latter can hand back an HTML DOM object (or
+# choke) depending on proxy/content-type, which is the likely cause of the
+# "empty list". This path is explicit and predictable.
+$depts = @()
 try {
-	$depts = @(Invoke-RestMethod -Uri "$base/api/departments" -TimeoutSec 10)
+	$resp = Invoke-WebRequest -Uri "$base/api/departments" -UseBasicParsing -TimeoutSec 15
+	$depts = @($resp.Content | ConvertFrom-Json)
 } catch {
-	Fail "Couldn't fetch the department list from $DashboardHost."
+	Fail "Couldn't fetch the department list from $DashboardHost. ($($_.Exception.Message))"
 }
-if (-not $depts -or $depts.Count -eq 0) { Fail 'No departments were returned by the server.' }
+if (-not $depts -or $depts.Count -eq 0 -or -not $depts[0].code) {
+	Write-Host 'Server response (first 300 chars):' -ForegroundColor Yellow
+	Write-Host ("$($resp.Content)".Substring(0, [Math]::Min(300, "$($resp.Content)".Length)))
+	Fail 'No departments were returned by the server.'
+}
+Write-Host "Loaded $($depts.Count) departments." -ForegroundColor Green
 
-$selected = $null
-if (Get-Command Out-GridView -ErrorAction SilentlyContinue) {
-	$selected = @($depts | Select-Object code, label |
-		Out-GridView -Title 'Select every department you print for (Ctrl-click for more than one), then click OK' -PassThru)
+# Numbered console selection is the reliable primary path (Out-GridView
+# isn't present on every Windows and was the likely cause of the blank
+# list). Optionally filter first, since there are many departments.
+$filter = Read-Host 'Type part of a department name/code to narrow the list, or press Enter to see them all'
+$shown = if ($filter.Trim()) {
+	@($depts | Where-Object { "$($_.code) $($_.label)" -like "*$($filter.Trim())*" })
+} else { $depts }
+if ($shown.Count -eq 0) { $shown = $depts }
+
+Write-Host ''
+for ($i = 0; $i -lt $shown.Count; $i++) {
+	'{0,3}: {1,-6} {2}' -f ($i + 1), $shown[$i].code, $shown[$i].label | Write-Host
 }
-if (-not $selected -or $selected.Count -eq 0) {
-	# Fallback for Server Core / no Out-GridView: numbered console prompt.
-	Write-Host ''
-	Write-Host 'Departments:'
-	for ($i = 0; $i -lt $depts.Count; $i++) {
-		'{0,3}: {1} - {2}' -f ($i + 1), $depts[$i].code, $depts[$i].label
-	}
-	$pick = Read-Host 'Enter the numbers you print for, comma-separated (e.g. 1,4,7)'
-	$idx = $pick -split '[,\s]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ - 1 }
-	$selected = @($idx | Where-Object { $_ -ge 0 -and $_ -lt $depts.Count } | ForEach-Object { $depts[$_] })
-}
+$pick = Read-Host 'Enter the number(s) you print for, comma-separated (e.g. 1,4,7)'
+$idx = $pick -split '[,\s]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ - 1 }
+$selected = @($idx | Where-Object { $_ -ge 0 -and $_ -lt $shown.Count } | ForEach-Object { $shown[$_] })
 if (-not $selected -or $selected.Count -eq 0) { Fail 'No departments selected, so nothing was changed.' }
 
 # 4. Remove any existing church queues on this PC ----------------------------

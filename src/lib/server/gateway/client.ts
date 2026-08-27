@@ -94,10 +94,14 @@ export interface GatewayJobEntry {
  * This is the authoritative source for gateway-originated jobs -- see
  * syncGatewayUsage() in src/lib/server/printer/sync.ts.
  */
-export async function fetchGatewayJobs(sinceIso: string | null): Promise<GatewayJobEntry[]> {
+export async function fetchGatewayJobs(
+	sinceIso: string | null,
+	queue?: string
+): Promise<GatewayJobEntry[]> {
 	if (!GATEWAY_URL) return [];
 	const url = new URL(`${GATEWAY_URL}/jobs`);
 	if (sinceIso) url.searchParams.set('since', sinceIso);
+	if (queue) url.searchParams.set('queue', queue);
 	const res = await fetch(url, { headers: authHeaders() });
 	if (!res.ok) throw new Error(`Gateway /jobs request failed: ${res.status}`);
 	return (await res.json()) as GatewayJobEntry[];
@@ -136,11 +140,12 @@ export async function fetchGatewayActiveJobs(): Promise<GatewayActiveJob[]> {
 	return (await res.json()) as GatewayActiveJob[];
 }
 
-/** Recent cupsd error_log lines from the gateway. */
-export async function fetchGatewayLogs(lines = 200): Promise<string[]> {
+/** Recent cupsd error_log lines from the gateway; with `queue`, just that queue's activity. */
+export async function fetchGatewayLogs(lines = 200, queue?: string): Promise<string[]> {
 	if (!GATEWAY_URL) return [];
 	const url = new URL(`${GATEWAY_URL}/logs`);
 	url.searchParams.set('lines', String(lines));
+	if (queue) url.searchParams.set('queue', queue);
 	const res = await fetch(url, { headers: authHeaders() });
 	if (!res.ok) throw new Error(`Gateway /logs request failed: ${res.status}`);
 	return ((await res.json()) as { lines: string[] }).lines;

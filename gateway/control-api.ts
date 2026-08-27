@@ -316,6 +316,39 @@ async function readRecentLog(lines: number): Promise<string[]> {
 		.slice(-lines);
 }
 
+/**
+ * The error_log lines relevant to one queue -- its per-job activity
+ * (queued / sent / completed / failed-with-reason). CUPS references jobs as
+ * "[Job N]" and logs which queue each was "queued on", so we first collect
+ * the job ids that belong to this queue (from lines naming it), then keep
+ * every line that names the queue OR one of those jobs. Best-effort; the
+ * dashboard shows it as "recent activity for this queue".
+ */
+async function readQueueLog(queue: string, lines: number): Promise<string[]> {
+	let raw: string;
+	try {
+		raw = await readFile(ERROR_LOG_PATH, 'utf-8');
+	} catch {
+		return [];
+	}
+	const all = raw.split('\n').filter((l) => l.trim());
+
+	// Job ids seen on the same line as this queue name.
+	const jobIds = new Set<string>();
+	for (const line of all) {
+		if (!line.includes(queue)) continue;
+		const m = line.match(/Job (\d+)/i);
+		if (m) jobIds.add(m[1]);
+	}
+
+	const relevant = all.filter((line) => {
+		if (line.includes(queue)) return true;
+		const m = line.match(/\[Job (\d+)\]/i);
+		return m ? jobIds.has(m[1]) : false;
+	});
+	return relevant.slice(-lines);
+}
+
 interface GatewayJob {
 	queueName: string;
 	jobId: string; // the CUPS job id (unique per queue)
@@ -476,7 +509,9 @@ const server = createServer(async (req, res) => {
 
 		if (req.method === 'GET' && url.pathname === '/jobs') {
 			const since = url.searchParams.get('since');
-			const entries = await readPageLog(since);
+			const queue = url.searchParams.get('queue');
+			let entries = await readPageLog(since);
+			if (queue) entries = entries.filter((e) => e.queueName === queue);
 			res.writeHead(200, { 'content-type': 'application/json' });
 			res.end(JSON.stringify(entries));
 			return;
@@ -507,9 +542,11 @@ const server = createServer(async (req, res) => {
 		}
 
 		// Recent cupsd error_log lines, for the dashboard's "what's going on".
+		// With ?queue=<name>, just that queue's job activity.
 		if (req.method === 'GET' && url.pathname === '/logs') {
 			const lines = Math.min(Number(url.searchParams.get('lines')) || 200, 1000);
-			const log = await readRecentLog(lines);
+			const queue = url.searchParams.get('queue');
+			const log = queue ? await readQueueLog(queue, lines) : await readRecentLog(lines);
 			res.writeHead(200, { 'content-type': 'application/json' });
 			res.end(JSON.stringify({ lines: log }));
 			return;
